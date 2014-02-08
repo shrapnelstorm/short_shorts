@@ -1,5 +1,5 @@
 from enum import Enum 
-typ = Enum('prepare','accept','promise','accepted','learner')
+typ = Enum('prepare','accept','promise','accepted','learner','update')
 class Message:
     def __init__(self,typ,pnr,val,round_no,command,client_no)
         self.type = typ
