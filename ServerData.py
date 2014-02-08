@@ -1,3 +1,4 @@
+import os
 import pickle
 
 class Lock_Status:
@@ -5,7 +6,7 @@ class Lock_Status:
         self.status = status
         self.client_no = client_no
 
-class Legder:
+class Ledger:
     def __init__(self, pnr_chosen, value_chosen, command_chosen, client_chosen):
         self.pnr_chosen = pnr_chosen
         self.value_chosen = value_chosen
@@ -17,12 +18,13 @@ class ServerData:
 		self.file_name = str(server_id) + ".sav"
 		if os.path.isfile(self.file_name):
 			# if file exists with server_id then load from file
+			self.load()
 		else:
 			self.ledger = []
 			self.accepted = []
 	def save(self):
 	    with open(self.file_name,'wb') as output:
-	        pickle.dump([ledger,accepted],output,-1)
+	        pickle.dump([self.ledger,self.accepted],output,-1)
 	        
 	def load(self):
 	    with open(self.file_name,'rb') as input:
@@ -34,3 +36,11 @@ class ServerData:
 	def update_accepted(self,accepted_instance):
 	    self.accepted.append(accepted_instance)
 	    
+	    
+s = ServerData(10)
+s.update_ledger(Ledger(8,67,34,2))
+s.update_accepted(3)
+s.save()
+if os.path.isfile('10.sav'):
+    print 'works'
+
