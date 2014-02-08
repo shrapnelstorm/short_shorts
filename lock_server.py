@@ -5,6 +5,7 @@
 ############################################################	
 
 import pipe
+import Queue
 from threading import Thread
 import os
 import random
@@ -14,6 +15,7 @@ import time
 # NOTE: use @staticmethod to define a static method
 NUM_SERVERS = 10
 LS_MGR = None
+
 def get_lock_server():
 	"""returns global LockServer instance"""
 	if LS_MGR is None:
@@ -53,7 +55,7 @@ class LockServerManager:
 		self.num_servers = n_serv
 		self.server_client_comm = [pipe.Pipe() for i in range(n_serv)]
 		self.paxos_comm = [pipe.Pipe() for i in range(n_serv)]
-		self.manager_comm = queue.Queue() # just use a regular queue for this
+		self.manager_comm = Queue.Queue() # just use a regular queue for this
 
 
 		# maps round --> psn generator
@@ -61,18 +63,22 @@ class LockServerManager:
 	
 	def create_instances(self):
 		# run the required number of lock servers
-		for i in range(num_servers):
-			LockServerThread(i, paxos_comm, server_client_comm[i], manager_comm).run()
+		for i in range(self.num_servers):
+			LockServerThread(i, self.paxos_comm, self.server_client_comm[i], self.manager_comm).run()
 
 	def manage_servers(self):
 		# TODO: need to do something other than busy wait
 		while True:
 			# listen for messages from servers
 			# if server has failed, wait a timeout period and initialize a new server
-			if not manager_comm.empty():
+			if not self.manager_comm.empty():
 				s_id, timeout = manager_comm.get()
 				threading.Thread(target=init_new_server, arg=[s_id, self.paxos_comm, self.server_client_comm[s_id], manager_comm,timeout]).start()
 	
+	def run(self):
+		self.create_instances()
+		self.manage_servers()
+
 	def init_new_server(server_id, paxos_comm, sc_comm, man_comm, timeout=0):
 		# wait designated time
 		sleep(timeout)
@@ -98,16 +104,17 @@ class LockServerThread(Thread):
 
 		# initialize data fields
 		self.id_num = id_num
-		self.out_comm = out_comm
-		self.in_comm = in_comm
+		self.paxos_comm = paxos_comm
 		self.client_comm = client_comm
 		self.manager_comm = manager_comm
-		self.ledger = []
+		#self.ledger = []
 		self.fail_rate = fail_rate
+
 	
 	# will run the paxos protocol
 	def run(self):
-		return "unimplemented"
+		print "server %d running" % self.id_num
+		#return "unimplemented"
 
 		# if previously saved file exists then initialize from it
 		# if received a client request => propose it.
@@ -132,3 +139,10 @@ class LockServerThread(Thread):
 #			self.accepted = []
 #	def save(self):
 #	def load(self):
+
+
+# code to test lock server and manager class
+
+# get lock server
+ls = LockServerManager(10)
+ls.run()

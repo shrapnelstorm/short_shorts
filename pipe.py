@@ -64,5 +64,5 @@ class Pipe:
 			return
 		self.queue.put(msg)
 		
-x = Pipe()
-print x.empty()
+#x = Pipe()
+#print x.empty()
