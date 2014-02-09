@@ -10,6 +10,7 @@ from threading import Thread
 import os
 import random
 import time
+import countvotes
 
 # top level functions to use LockServer
 # NOTE: use @staticmethod to define a static method
@@ -99,7 +100,7 @@ NUM_LOCKS = 15
 #prep_req, propose, vote_received,
 class LockServerThread(Thread): 
 	"""docstring for LockServer"""
-	def __init__(self, id_num, paxos_comm, client_comm, manager_comm, fail_rate=0):
+	def __init__(self, id_num, paxos_comm, client_comm, manager_comm, fail_rate=0, maj_threshold):
 		Thread.__init__(self)
 
 		# initialize data fields
@@ -108,7 +109,9 @@ class LockServerThread(Thread):
 		self.client_comm = client_comm
 		self.manager_comm = manager_comm
 		#self.ledger = []
+		self.server_data = ServerData(id_num)
 		self.fail_rate = fail_rate
+		self.maj_threshold = maj_threshold
 
 	
 	# will run the paxos protocol
@@ -128,6 +131,36 @@ class LockServerThread(Thread):
 
 		# save any new state in ledger or instance state
 		# repeat
+	
+	def prepare_msg(self,round_no):
+	    psn = get_lock_server().get_psn(round_no)
+	    return Message('prepare',psn,0,round_no,0,0)
+	    
+	def promise_msg(self,round_no,prepare_psn):
+	    (highest_psn,val) = self.server_data.highest_accepted(round_no)
+	    if prepare_psn > highest_psn:
+	         msg = Message('promise',highest_psn,val,round_no,val[0],val[1])
+	         return msg
+	    else:
+	        return None
+	        
+	def accept_msg(self,round_no,list_val,psn):
+	    maj = majority(list_val,self.maj_threshold)
+	    if maj[0] == 0:
+	        return None
+	    else:
+	        return Message('accept',psn,maj[1],round_no,maj[1][0],maj[1][1])
+	    
+    def accepted_msg(self,message):
+        if message.psn >= self.server_Data.highest_accepted(message.round_no)[0]:
+            return Message('accepted',message.psn,message.val,message.round_no,message.command,message.client_no)
+        else if message.val == self.server_Data.highest_accepted(message.round_no)[1]:
+            return Message('accepted',message.psn,message.val,message.round_no,message.command,message.client_no)
+        else:
+            return None
+            
+    def main(self):
+        
 	
 #class ServerData:
 #	def __init__(self, server_id):
