@@ -7,11 +7,12 @@ class Lock_Status:
         self.client_no = client_no
 
 class Ledger:
-    def __init__(self, pnr_chosen, value_chosen, command_chosen, client_chosen):
+    def __init__(self, round_no, pnr_chosen, value_chosen, command_chosen, client_chosen):
         self.pnr_chosen = pnr_chosen
         self.value_chosen = value_chosen
         self.command_chosen = command_chosen
         self.client_chosen = client_chosen
+		self.round_no = round_no
         
 class ServerData:
 	def __init__(self, server_id):
@@ -31,10 +32,16 @@ class ServerData:
 	        [self.ledger,self.accepted] = pickle.load(input)
 	        
 	def update_ledger(self,ledger_instance):
-	    self.ledger.append(ledger_instance)
+		while len(self.ledger) < ledger_instance.round_no:
+			self.ledger.append(None)
+	    self.ledger[ledger_instance.round_no] = ledger_instance
 	    
 	def update_accepted(self,accepted_instance):
-	    self.accepted.append(accepted_instance)
+		while len(self.accepted) < accepted_instance.round_no:
+			self.accepted.append(None)
+	    self.accepted[accepted_instance.round_no] = accepted_instance
+	#def inconsistent(self, round_no):
+		#return (len(self.ledger)+1 < round_no)
 	    
 	    
 s = ServerData(10)
