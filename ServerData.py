@@ -18,6 +18,7 @@ class VoteTally():
 
 	# count distinct votes, return true if majority
 	# TODO: delete old entries
+	# XXX: 
 	def add_vote(proposal, vote):
 		vote_set = self.counts.setdefault(proposal, set())
 		vote_set.add(vote)
