@@ -151,7 +151,14 @@ class ServerData:
 	def last_promise(self, round_num):
 		return self.promises.setdefault(round_num, None)
 	    
-	    
+	# checks if a specific instruction is there in the ledger
+	def search_ledger(self, instr,lock_no):
+		for i in range(len(self.ledger)-1,0,-1):
+			if self.ledger[i]!=None and self.ledger[i].val[0] == instr and self.ledger[i].val[1] == lock_no:
+				return True	    
+		if self.Ledger == [None,None]:
+			return True
+		return False
 
 		
 ## fix these tests!!!
