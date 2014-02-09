@@ -48,11 +48,11 @@ class Pipe:
 	# simulates latency and packet reordering
 	def get(self):
 		# simulate latency in message arriving
-		sleep(self.latency)
+		time.sleep(self.latency)
 
 		self.get_msgs()
 		# return highest indexed message
-		if not self.prev_msgs.empty:
+		if not self.empty():
 			return self.prev_msgs.pop()
 		else:
 			return None
