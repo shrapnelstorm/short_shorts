@@ -27,8 +27,8 @@ import ServerData
 # NOTE: use @staticmethod to define a static method
 NUM_SERVERS = 10
 LS_MGR = None
-#file_names = ['clients/1.client', 'clients/2.client']
-file_names = ['clients/simple.client']
+file_names = ['clients/1.client', 'clients/2.client']
+#file_names = ['clients/simple.client']
 
 def get_lock_server():
 	"""returns global LockServer instance"""
@@ -71,7 +71,7 @@ class LockServerManager:
 		self.num_clients        = n_client
 		self.client_server_comm	= [pipe.Pipe() for i in range(n_serv)]
 		self.server_client_comm	= [pipe.Pipe() for i in range(n_client)]
-		self.paxos_comm 		= [pipe.Pipe(loss_factor=30) for i in range(n_serv)]
+		self.paxos_comm 		= [pipe.Pipe(loss_factor=20) for i in range(n_serv)]
 		self.manager_comm		= Queue.Queue() # just use a regular queue for this
 		self.majority			= int(math.ceil(n_serv/2.0))
 		self.timeout			= 5	 # seconds
@@ -331,7 +331,8 @@ class LockServerThread(Thread):
 
 			# check if entry is missing from ledger
 			if self.server_data.ledger.ledger[msg.proposal.round_num] == None:
-				self.server_data.ledger.ledger[msg.proposal.round_num] = msg.proposal
+				self.server_data.ledger.update_ledger(msg.proposal)
+				get_lock_server().print_ledger(self.server_data.ledger, self.id_num)
 				try:
 					self.server_data.ledger.missing_entries.remove(msg.proposal.round_num)
 				except ValueError:
@@ -359,7 +360,7 @@ class LockServerThread(Thread):
 				r_num = self.server_data.ledger.missing_entries[0]
 				self.send_decision_req(r_num)
 				print "pending messages %d " % len(self.server_data.pending_requests)
-				continue
+				#continue
 			if not self.client_comm.empty() or len(self.server_data.pending_requests) > 0:
 				#print "checking pending"
 				#print "%d received message" % self.id_num
@@ -367,7 +368,8 @@ class LockServerThread(Thread):
 				# get new messages from queue
 				if not self.client_comm.empty():
 					cmd = self.client_comm.get()
-					self.server_data.pending_requests.append((cmd,None))
+					req = cmd,None
+					self.server_data.pending_requests.append(req)
 				# find round number and make_proposal()
 
 				r = self.server_data.pending_requests.pop(0)

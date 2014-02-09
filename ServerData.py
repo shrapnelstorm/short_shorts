@@ -45,7 +45,9 @@ class Ledger:
 	def update_ledger(self, chosen_proposal):
 		round_no = chosen_proposal.round_num
 		last_entry = len(self.ledger) 
-
+		if round_no < last_entry-1:
+			self.ledger[round_no] = chosen_proposal
+			return
 		# make room for new entry if needed, & record missing entries
 		while last_entry <= round_no:
 			self.ledger.append(None)
@@ -53,11 +55,16 @@ class Ledger:
 				self.missing_entries.append(last_entry)
 			last_entry += 1
 			#print self.missing_entries
-
+		for i in range(1,round_no):
+			if self.ledger[i] == None:
+				if i not in self.missing_entries:
+					self.missing_entries.append(i) 
 		# store proposal
 		#print "r: %d size:%d" %(round_no, len(self.ledger))
+		if self.ledger[round_no] == None:
+		    self.ledger.append(None)
 		self.ledger[round_no] = chosen_proposal
-		self.ledger.append(None)
+		#self.ledger.append(None)
 
 	def is_inconsistent(self):
 		return len(self.missing_entries) > 0
@@ -67,7 +74,7 @@ class Ledger:
 	def print_ledger(self):
 		for i in self.ledger:
 			if i != None:
-				print i.val
+				print str(i.val) + str(i.round_num) + "length:" + str(len(self.ledger))
 
 	# return true if only if proposal has been decided
 	def lookup_round_num(self, r_num):
