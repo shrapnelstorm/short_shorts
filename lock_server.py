@@ -4,16 +4,22 @@
 ##				implementation.
 ############################################################	
 
-import pipe
+# standard libraries
+import math
 import Queue
 import threading
-from threading import Thread
 import threading
 import os
 import random
 import time
 from time import sleep
-import countvotes
+from threading import Thread
+
+# helper files
+#import countvotes
+import message
+import pipe
+import ServerData
 
 # top level functions to use LockServer
 # NOTE: use @staticmethod to define a static method
@@ -57,13 +63,14 @@ class LockServerManager:
 	# call order: create_instances, manage_servers
 
 	def __init__(self, n_serv=10):
-		self.num_servers = n_serv
-		self.server_client_comm = [pipe.Pipe() for i in range(n_serv)]
-		self.paxos_comm = [pipe.Pipe() for i in range(n_serv)]
-		self.manager_comm = Queue.Queue() # just use a regular queue for this
+		self.num_servers		= n_serv
+		self.server_client_comm	= [pipe.Pipe() for i in range(n_serv)]
+		self.paxos_comm 		= [pipe.Pipe() for i in range(n_serv)]
+		self.manager_comm		= Queue.Queue() # just use a regular queue for this
+		self.majority			= int(math.ceil(n_serv/2.0))
 
 
-		# maps round --> psn generator
+		# maps round_no --> psn generator
 		self.psns = dict() # an empty dictionary of unique psns 
 
 		# create instances
@@ -107,7 +114,8 @@ NUM_LOCKS = 15
 #prep_req, propose, vote_received,
 class LockServerThread(Thread): 
 	"""docstring for LockServer"""
-	def __init__(self, id_num, paxos_comm, client_comm, manager_comm, fail_rate=0, maj_threshold):
+	# TODO: figure out how to include majority threshold
+	def __init__(self, id_num, paxos_comm, client_comm, manager_comm, fail_rate=0):
 		Thread.__init__(self)
 
 		print id_num
@@ -117,9 +125,9 @@ class LockServerThread(Thread):
 		self.client_comm = client_comm
 		self.manager_comm = manager_comm
 		#self.ledger = []
-		self.server_data = ServerData(id_num)
+		self.server_data = ServerData.ServerData(id_num)
 		self.fail_rate = fail_rate
-		self.maj_threshold = maj_threshold
+		#self.maj_threshold = maj_threshold
 
 		self.majority= {}
 		self.chosen_values = {}
@@ -139,47 +147,83 @@ class LockServerThread(Thread):
 
 		# save any new state in ledger or instance state
 		# repeat
+
+###						SENDING MESSAGES 
+	# send a message to every other node
+	# TODO: do we want to send to self also?
+	def broadcast_msg(msg):
+		for idx, comm in  enumerate(self.paxos_comm): 
+			comm.put(result)
+
+	# TODO: if have time, implement dedicated learner
+	def send_to_learner(self, msg):
+		self.broadcast_msg(msg)
 	
+	# TODO: change update to use new message types
+	def update_ledger(self,round_no,list_val,psn):
+		return "unimplemented"
+		#maj = majority(list_val,self.maj_threshold)
+		#if maj[0] == 1: 
+		## update ledger
+		#	entry = Ledger(round_no, maj[1].psn, maj[1].val, maj[1].cmd, maj[1].client)
+		#	self.server_data.update_ledger(round_no, entry)
+
+		# TODO: request missing data
+		#if inconsistent(round_no):
+			# update required
+
+###						GENERATING MESSAGES
+
 	# create a prepare message for a given round number
-	def prepare_msg(self,round_no):
-	    psn = get_lock_server().get_psn(round_no)
-	    return Message('prepare',psn,0,round_no,0,0)
+	def send_prepare_msg(self, cmd, r_num):
+		# get new psn, create proposal, and send prepare msg
+		new_psn	= get_lock_server().get_psn(r_num)
+		prop	= Proposal(new_psn, r_num, cmd)
+		msg		= PrepareMsg(self.id_num, prop)
+		self.broadcast_msg(msg)
 	    
 	# create a promise mesage, in response to a prepare
-	def promise_msg(self,round_no,prepare_psn):
-	    (highest_psn,val) = self.server_data.highest_accepted(round_no)
-	    if prepare_psn > highest_psn:
-	         msg = Message('promise',highest_psn,val,round_no,val[0],val[1])
-	         return msg
-	    else:
-	        return None
+	def send_promise_msg(self, prep_msg):
+		# XXX: change server_data to store Proposal objects!!!
+		accepted_proposal = self.server_data.highest_accepted(round_no)
+
+		if prep_msg.proposal.psn > accepted_proposal.psn:
+			 # respond with original proposal and last accepted proposal for round
+			 msg = PromiseMsg(self.id_num, prep_msg.proposal, accepted_proposal)
+			 self.paxos_comm[prep_msg.sender].put(msg)
 	        
 	# TODO: list of values?
 	# issue proposal message in response to promise messages
-	def proposal_msg(self,round_no,list_val,psn):
-	    maj = majority(list_val,self.maj_threshold)
-	    if maj[0] == 0: return None
-	    else:
-	        return Message('proposal',psn,maj[1],round_no,maj[1][0],maj[1][1])
+	def send_proposal_msg(self, promise_msg):
+		# 				old code
+		#ls = self.update_majority(promise_msg, self.majority) ### TODO: fix this code to use new MSG types
+		#maj = majority(ls,self.maj_threshold)
+		#if maj[0] == 0: return None
+		#else:
+			# XXX: TODO: cleanup this code, hard to understand
+		#	msg = Message('proposal',psn,maj[1],round_no,maj[1][0],maj[1][1])
+		#	self.broadcast_msg(new_msg)
+		if self.server_data.prepare_tally.add_vote(promise_msg.orig_proposal, promise_msg.server_id):
+			# XXX: TODO: make sure proposal has value too!!
+			# TODO: after sending proposal, clear tally
+			msg = ProposalMsg(promise_msg.orig_proposal)
 
-	def update_ledger(self,round_no,list_val,psn):
-	    maj = majority(list_val,self.maj_threshold)
-	    if maj[0] == 1: 
-			# update ledger
-			entry = Ledger(round_no, maj[1].psn, maj[1].val, maj[1].cmd, maj[1].client)
-			self.server_data.update_ledger(round_no, entry)
-			# TODO: request missing data
-			#if inconsistent(round_no):
-				# update required
 	    
-    def accepted_msg(self,message):
-        if message.psn >= self.server_Data.highest_accepted(message.round_no)[0]:
-            return Message('accepted',message.psn,message.val,message.round_no,message.command,message.client_no)
-        else if message.val == self.server_Data.highest_accepted(message.round_no)[1]:
-            return Message('accepted',message.psn,message.val,message.round_no,message.command,message.client_no)
-        else:
-            return None
+	## TODO: fix server data
+	## This logic seems incorrect. We should be checking if a value has been chosen too (in ledger)
+	def send_vote_msg(self, prop_msg):
+		msg = None
+		last_accepted_psn = self.server_Data.highest_accepted(prop_msg.proposal.round_no)[0]
+		if prop_msg.proposal.psn >= last_accepted_psn:
+			msg = VoteMsg(self.id_num, prop_msg.proposal)
+		## why do we want to do this??
+		elif message.val == self.server_Data.highest_accepted(message.round_no)[1]:
+			msg = VoteMsg(self.id_num,prop_msg.proposal)
+
+		if not (msg is None):
+			self.send_to_learner(msg)
             
+###						HANDLING MESSAGES
 	# TODO: finish implementing this!!!
 	def check_paxos_msgs(self):
 		inbox = self.paxos_comm[self.id_num]
@@ -195,52 +239,36 @@ class LockServerThread(Thread):
 		if hmap[entry] is None:
 			hmap[entry] = [msg]
 		else:
-			hmap[entry] = hmap[entry] + msg]
+			hmap[entry] = hmap[entry] + [msg]
 		return hmap[entry]
 
-	# send a message to every other node
-	# TODO: do we want to send to self also?
-	def broadcast_msg(msg):
-		for idx, comm in  enumerate(self.paxos_comm): 
-			comm.put(result)
 
-	# TODO: if have time, implement dedicated learner
-	def send_to_learner(self, msg):
-		self.broadcast_msg(msg)
 	# handle a single received message
 	def handle_paxos_msg(self,msg):
-		if msg.typ == 'prepare':
-			result = self.promise_msg(msg.round_no, msg.psn)
-			if not (result is None):
-				self.paxos_comm[msg.sender].put(result)
-		elif msg.typ =='promise':
-			ls = self.update_majority(msg, self.majority)
-			new_msg = self.proposal_msg(msg.round_no, ls, msg.orig_psn)
-			if not (new_msg is None):
-				self.broadcast_msg(new_msg)
-		elif msg.typ =='proposal':
+		msg_type = type(msg)
+		if msg_type == PrepareMsg: # received prepare, send promise
+			self.send_promise_msg(msg.round_no, msg.psn)
+		elif msg_type == PromiseMsg: # received promise, send proposal
+			self.send_proposal_msg(msg.round_no, ls, msg.orig_psn)
+		elif msg_type == ProposalMsg: # received proposal, send vote
 			# issue accept message in response to proposal
-			new_msg = self.accepted_msg(msg)
-			if not (new_msg is None):
-				self.send_to_learner(new_msg)
-		elif msg.typ =='accepted':
+			self.send_vote_msg(msg)
+		elif msg_type == VoteMsg: # tally received votes
 			# received vote
+			# TODO: fix this, seems incorrect!!
 			ls = self.update_majority(msg, self.chosen_values)
-			new_msg = self.proposal_msg(msg.round_no, ls, msg.orig_psn)
-		#elif msg.typ == 'learn':
-		#elif msg.typ == 'update':
+		#elif msg_type == DecisionRequest:
+		#elif msg_type == DecisionResponse:
 
-	def make_proposal(self, cmd, r_num):
-		msg = Message('prepare',get_lock_server().get_psn(r_num),cmd,r_num,cmd, cmd.client_id, self.id_num, None)
-		self.broadcast_msg(msg)
-	def server_main(self):
 
+	# TODO: handle paxos msgs too
+	def run(self):
 		while True:
-			self.check_paxos_msgs(()
+			self.check_paxos_msgs()
 			if not self.client_comm.empty():
-				#print "%d received message" % self.id_num
+				print "%d received message" % self.id_num
 				cmd = self.client_comm.get()
-				self.pending_requests.append(cmd)
+				self.server_data.pending_requests.append(cmd)
 				# find round number and make_proposal()
 
 			# propose command
@@ -257,14 +285,6 @@ class LockServerThread(Thread):
 ## Programmer: 	Siva
 ## Desc:		Client class
 ############################################################	
-class Command:
-    def __init__(self,cmd_type,cmd_arg, client_id):
-        self.cmd_type = cmd_type
-        self.cmd_arg = cmd_arg
-		self.client_id = client_id
-	def __str__(self):
-		return "bacon" #self.cmd_type + " " + self.cmd_arg
-        
 class Client(Thread):
     
     def __init__(self, id_num, filename):
@@ -280,33 +300,27 @@ class Client(Thread):
         lines = [line.strip() for line in f]
         f.close()
         return lines
-    def sleep(self,delay):
-        time.sleep(delay) # it sleeps for (time) seconds
-    def parse_command(self,command):
-        inst = command.split(' ',1)
-        cmd = Command(inst[0],inst[1])
-        return cmd
+    def parse_command(self,line):
+		# client command is (cmd_type, number, client_id)
+		# number is either lock num or sleep time
+        return tuple(line.split(' ',1) + [self.id_num])
 
     def send_to_server(self, cmd):
         rand_server = random.randint(0,self.ls_mgr.num_servers - 1)
         self.servers[rand_server].put(cmd)
-        print cmd.cmd_type + " id:" + str(self.id_num) + " to server " + str(rand_server)
 
     def run(self):
-        instrs = self.read_inst()
-        for instr in instrs:
-            cmd = self.parse_command(instr)
-            if cmd.cmd_type == 'obtain_lock':
-                #send lock number request
-                self.send_to_server(cmd)
-            if cmd.cmd_type == 'sleep':
-                print cmd.cmd_type + str(self.id_num)
-                sleep(int(cmd.cmd_arg))
-            if cmd.cmd_type == 'release_lock':
-                # send lock release request
-                self.send_to_server(cmd)
-                
-        print "done"
+			instrs = self.read_inst()
+			for instr in instrs:
+				cmd = self.parse_command(instr)
+				cmd_type, _, _ = cmd
+				if cmd_type == 'sleep':
+					_,timeout,_ = cmd
+					sleep(int(timeout))
+				else :
+					self.send_to_server(cmd)
+			print "done"
+
 def spawn_clients(num,file_names):
      for i in range(num):
         print "spawning client"
@@ -323,5 +337,4 @@ ls = LockServerManager(10)
 LS_MGR = ls
 spawn_clients(len(file_names), file_names)
 ls.run()
-
 

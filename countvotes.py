@@ -1,6 +1,7 @@
+# TODO: check with siva
 def majority(array,maj_threshold):
     counter = 1
-    guess = array[]
+    #guess = array[]
     for i in range(1,array.amount()):
         if array[i] == guess :
             counter++
