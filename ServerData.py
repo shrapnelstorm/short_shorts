@@ -74,11 +74,11 @@ class Ledger:
 		return len(self.missing_entries) > 0
 		
 
-	# XXX: debug function
+	# prints the contents of the ledger
 	def print_ledger(self):
 		for i in self.ledger:
 			if i != None:
-				print str(i.val) + str(i.round_num) + "length:" + str(len(self.ledger))
+				print str(i.val) + " round_no: " str(i.round_num) + " length: " + str(len(self.ledger))
 
 	# return true if only if proposal has been decided
 	def lookup_round_num(self, r_num):
@@ -89,6 +89,8 @@ class Ledger:
 	# return missing entries to be requested later
 	def get_missing_entries(self):
 		return self.missing_entries
+	
+	# return the maximim round number
 	def max_r_num(self):
 		pls = [ prop for prop in self.ledger ]
 		ls = []
@@ -118,6 +120,7 @@ class ServerData:
 		self.prepare_tally			= VoteTally(majority)
 		self.accept_tally			= VoteTally(majority)
 
+	# save and load functions for backup
 	def save(self):
 		with open(self.file_name,'wb') as output:
 			pickle.dump([self.ledger,self.accepted,self.pending_requests],output,-1)
@@ -126,11 +129,13 @@ class ServerData:
 			with open(self.file_name,'rb') as input:
 				[self.ledger,self.accepted,self.pending_requests] = pickle.load(input)
 
+	# update the list of accepted proposals
 	def update_accepted(self, accepted_prop):
 		## XXX: make sure this psn is higher than previous
 		self.accepted[accepted_prop.round_num] = accepted_prop
 	#def inconsistent(self, round_no):
 		#return (len(self.ledger)+1 < round_no)
+	
 	def max_r_num_accepted(self):
 		ls = [ r_num for r_num in self.accepted.keys()]
 		if len(ls) == 0:

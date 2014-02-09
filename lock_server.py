@@ -30,15 +30,16 @@ LS_MGR = None
 file_names = ['clients/1.client', 'clients/2.client']
 #file_names = ['clients/simple.client']
 
+#(i,j) specifies the node i fails after time j 
+nodes_tofail = [(1,10),(20,90)]
+
+#function that spawns the nodes of a distributed system
 def get_lock_server():
 	"""returns global LockServer instance"""
 	global LS_MGR
 	if LS_MGR is None:
 		LS_MGR = LockServerManager(5, len(file_names)) # system replicated 10 times
 	return LS_MGR
-
-## TODO: the above may not be necessary
-
 
 
 # generate a function that creates unique psn's
@@ -65,7 +66,7 @@ class LockServerManager:
 	# TODO: come up with a good way to do this!!
 
 	# call order: create_instances, manage_servers
-
+	# constructor of the class
 	def __init__(self, n_serv=10, n_client=10):
 		self.num_servers		= n_serv
 		self.num_clients        = n_client
@@ -87,6 +88,7 @@ class LockServerManager:
 		# lock to print ledger
 		self.print_lock =	threading.Lock()
 	
+	# function that prints the ledger
 	def print_ledger(self, ledger, server):
 		self.print_lock.acquire()
 		print "\nledger for %d" % server
@@ -178,12 +180,14 @@ class LockServerThread(Thread):
 		for idx, comm in  enumerate(self.paxos_comm): 
 			comm.put(msg)
 
+	# send a message to every other node but itself
 	def broadcast_to_others(self, msg):
 		for idx, comm in  enumerate(self.paxos_comm): 
 			if idx != self.id_num:
 				comm.put(msg)
 
 	# TODO: if have time, implement dedicated learner
+	# Design choice for learning chosen values: No dedicated learner - hence broadcast the message to everyone
 	def send_to_learner(self, msg):
 		self.broadcast_msg(msg)
 	
@@ -218,6 +222,7 @@ class LockServerThread(Thread):
 		accepted_proposal = self.server_data.lookup_proposal(prep_msg.proposal.round_num)
 		promise = self.server_data.last_promise(prep_msg.proposal.round_num)
 
+		# sends out a promise for proposal numbers greater than the previously promised number
 		if promise is None or prep_msg.proposal.psn >= promise:
 			 # respond with original proposal and last accepted proposal for round
 			 self.server_data.update_promises(prep_msg.proposal.round_num, prep_msg.proposal.psn)
@@ -228,10 +233,9 @@ class LockServerThread(Thread):
 	# TODO: list of values?
 	# issue proposal message in response to promise messages
 	def send_proposal_msg(self, promise_msg):
-		#print "%d sending proposal" % self.id_num
-
 		# storing promise instead of id
 		maj_resp, proposal = self.server_data.prepare_tally.add_vote(promise_msg.orig_proposal, promise_msg)
+		# check for majority promise messages for a particular prepare
 		if maj_resp:
 			# clear the votes, so proposal isn't sent again
 			self.server_data.prepare_tally.clear_votes(promise_msg.orig_proposal)
@@ -242,6 +246,7 @@ class LockServerThread(Thread):
 				if i != None:
 					array.append(i.val)
 			val_exists, val = majority(array,get_lock_server().majority)
+			# make sure one proposes the majority value if it exists
 			if val_exists and val is not None:
 				# create copy of proposal with majority value
 				prop = message.Proposal( promise_msg.orig_proposal.psn, promise_msg.orig_proposal.round_num, val)
@@ -275,7 +280,7 @@ class LockServerThread(Thread):
 			if self.debug_level >= 2: print "%d sent vote message :%s" % (self.id_num, msg.msg_str())
             
 ###						HANDLING MESSAGES
-	# TODO: finish implementing this!!!
+	# Calls the function that reads the paxos queue
 	def check_paxos_msgs(self):
 		inbox = self.paxos_comm[self.id_num]
 		if not inbox.empty():
@@ -351,21 +356,27 @@ class LockServerThread(Thread):
 					return 
 					# do nothing
 
-
+	# send a message with a chosen value
 	def send_decision_response(self, proposal, msg):
 		response = message.DecisionResponse(proposal)
 		self.paxos_comm[msg.sender].put(response)
 		if self.debug_level >= 2: print "%d sent  drespons:%s" % (self.id_num, response.msg_str())
-
+	
+	# message to request for a chosen value for a particular round
 	def send_decision_req(self, round_num):
 		msg = message.DecisionRequest( self.id_num, message.Proposal(None, round_num, None))
 		# don't send to self
 		self.broadcast_to_others(msg)
 		if self.debug_level >= 2: print "%d sent  dreq:%s" % (self.id_num, msg.msg_str())
 	
+	# the main function
 	def run(self):
 		time_out = get_lock_server().timeout
 		while True:
+			for i in nodes_tofail:
+			if i[0] == self.id_num:
+				if time() > i[1]:
+					return
 			self.check_paxos_msgs()
 			
 			# check ledger consistency
@@ -400,6 +411,7 @@ class LockServerThread(Thread):
 ############################################################	
 class Client(Thread):
     
+    # constructor for the class
     def __init__(self, id_num, filename):
         Thread.__init__(self)
         self.id_num = id_num
@@ -407,8 +419,10 @@ class Client(Thread):
         # get handle to lock servers, and server manager
         self.ls_mgr = get_lock_server()
         self.servers = self.ls_mgr.client_server_comm 
+        # communication channel to recieve messages from the server
         self.client_pipe = self.ls_mgr.server_client_comm[id_num]
-        
+
+    
     def read_inst(self):
         f = open(self.filename)
         lines = [line.strip() for line in f]
@@ -419,6 +433,7 @@ class Client(Thread):
 		# number is either lock num or sleep time
         return tuple(line.split(' ',1) + [self.id_num])
 
+	# write a message to the server queue
     def send_to_server(self, cmd):
         rand_server = random.randint(0,self.ls_mgr.num_servers - 1)
         self.servers[rand_server].put(cmd)
@@ -430,6 +445,7 @@ class Client(Thread):
 				r = self.client_pipe.get()
 			#print " r after loop " + str(r)
 
+	# the main function. read instructions from a file and dispatch requests accordingly
     def run(self):
 			instrs = self.read_inst()
 			for instr in instrs:
