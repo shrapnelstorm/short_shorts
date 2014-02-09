@@ -18,11 +18,13 @@ class VoteTally():
 
 	# count distinct votes, return true if majority
 	# TODO: delete old entries
-	# XXX: 
+	# returns T/F and proposal
+	# True when proposal has been chosen
+	# param: vote is voter_id
 	def add_vote(proposal, vote):
 		vote_set = self.counts.setdefault(proposal, set())
 		vote_set.add(vote)
-		return (len(vote_set) >= self.majority)
+		return ((len(vote_set) >= self.majority), proposal)
 	
 	# TODO: add more code to handle vote tallys
 
