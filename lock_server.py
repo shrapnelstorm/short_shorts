@@ -13,7 +13,9 @@ import os
 import random
 import time
 from time import sleep
+from time import time
 from threading import Thread
+
 
 # helper files
 #import countvotes
@@ -62,9 +64,11 @@ class LockServerManager:
 
 	# call order: create_instances, manage_servers
 
-	def __init__(self, n_serv=10):
+	def __init__(self, n_serv=10, n_client=10):
 		self.num_servers		= n_serv
-		self.server_client_comm	= [pipe.Pipe() for i in range(n_serv)]
+		self.num_clients        = n_client
+		self.client_server_comm	= [pipe.Pipe() for i in range(n_serv)]
+		self.server_client_comm	= [pipe.Pipe() for i in range(n_client)]
 		self.paxos_comm 		= [pipe.Pipe() for i in range(n_serv)]
 		self.manager_comm		= Queue.Queue() # just use a regular queue for this
 		self.majority			= int(math.ceil(n_serv/2.0))
@@ -262,15 +266,23 @@ class LockServerThread(Thread):
 
 
 	# TODO: handle paxos msgs too
-	def run(self):
+	def run(self,time_out):
 		while True:
 			self.check_paxos_msgs()
-			if not self.client_comm.empty():
+			
+			while not self.client_comm.empty():
 				print "%d received message" % self.id_num
 				cmd = self.client_comm.get()
-				self.server_data.pending_requests.append(cmd)
+				self.server_data.pending_requests.append((cmd,None))
 				# find round number and make_proposal()
 
+            r = pending_request.pop(0)
+            current_time = time()
+            if(r[1] is None or r[1] < current_time):
+                r[1] = current_time + self.time_out
+                self.send_prepare_msg(r[0])
+                pending_request.insert(0,r)
+                
 			# propose command
 		# TODO: delete this test code
 		#if self.id_num == 9:
@@ -293,7 +305,8 @@ class Client(Thread):
         self.filename = filename
         # get handle to lock servers, and server manager
         self.ls_mgr = get_lock_server()
-        self.servers = self.ls_mgr.server_client_comm 
+        self.servers = self.ls_mgr.client_server_comm 
+        self.client_pipe = self.ls_mgr.server_client_comm[id_num]
         
     def read_inst(self):
         f = open(self.filename)
@@ -308,6 +321,11 @@ class Client(Thread):
     def send_to_server(self, cmd):
         rand_server = random.randint(0,self.ls_mgr.num_servers - 1)
         self.servers[rand_server].put(cmd)
+        
+    def read_from_server(self):
+        r = self.client_pipe.get()
+        while not r is None:
+            r = self.client_pipe.get()
 
     def run(self):
 			instrs = self.read_inst()
@@ -319,6 +337,7 @@ class Client(Thread):
 					sleep(int(timeout))
 				else :
 					self.send_to_server(cmd)
+					self.read_from_server()
 			print "done"
 
 def spawn_clients(num,file_names):
@@ -333,7 +352,7 @@ def spawn_clients(num,file_names):
 file_names = ['clients/1.client', 'clients/2.client']
 
 # get lock server
-ls = LockServerManager(10)
+ls = LockServerManager(10,len(fine_names))
 LS_MGR = ls
 spawn_clients(len(file_names), file_names)
 ls.run()
