@@ -8,6 +8,7 @@
 import Queue
 import time
 import random
+import message
 
 
 class Pipe:
@@ -17,7 +18,7 @@ class Pipe:
 	# @param latency seconds until msg is received 
 	# @param reorder_factor range: 1 (low) - 100 (high) 
 	# @param loss_factor	range: 1 (low) - 100 (high) 
-	def __init__(self, latency=0, reorder_factor=0, loss_factor=0):
+	def __init__(self, loss_factor=0, latency=0, reorder_factor=0):
 		self.latency		= latency
 		self.reorder_factor	= reorder_factor
 		self.loss_factor	= loss_factor
@@ -60,7 +61,20 @@ class Pipe:
 	# send msg through channel unless message is to be lost randomly
 	def put(self, msg):
 		# apply loss factor first
-		if random.randint(0,100) < self.loss_factor :
+		r_value = random.randint(0,100)
+		if  r_value < self.loss_factor :
+			if isinstance(msg,message.PrepareMsg): # received prepare, send promise
+				print "++++++++++++++++++ LOST  prepare:%s" % (msg.msg_str())
+			elif isinstance(msg,message.PromiseMsg): # received promise, send proposal
+				print "++++++++++++++++++ LOST  promise:%s" % (msg.msg_str())
+			elif isinstance(msg,message.ProposalMsg): # received proposal, send vote
+				print "++++++++++++++++++ LOST  proposal:%s" % (msg.msg_str())
+			elif isinstance(msg,message.VoteMsg): # tally received votes
+				print "++++++++++++++++++ LOST  vote:%s" % (msg.msg_str())
+			elif isinstance(msg,message.DecisionRequest):
+				print "++++++++++++++++++ LOST  drequest:%s" % (msg.msg_str())
+			elif isinstance(msg,message.DecisionResponse):
+				print "++++++++++++++++++ LOST  drespons:%s" % (msg.msg_str())
 			return
 		self.queue.put(msg)
 		

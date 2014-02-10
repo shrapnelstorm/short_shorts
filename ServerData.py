@@ -29,12 +29,15 @@ class VoteTally():
 	# return the actual, stored votes for a proposal
 	def get_votes(self, proposal):
 		return self.counts.setdefault(proposal, set())
+
+	def clear_votes(self, proposal):
+		self.counts.setdefault(proposal, set()).clear()
 	
 	# TODO: add more code to handle vote tallys
 
 class Ledger:
 	def __init__(self):
-		self.ledger 			= []
+		self.ledger 			= [None, None]
 		self.missing_entries	= []
 
 	# TODO: include logic for updating entries
@@ -45,13 +48,19 @@ class Ledger:
 
 		# make room for new entry if needed, & record missing entries
 		while last_entry <= round_no:
-			last_entry += 1
 			self.ledger.append(None)
-			self.missing_entries.append(last_entry)
+			if last_entry > 0 and round_no != last_entry and self.ledger[last_entry] == None:
+				self.missing_entries.append(last_entry)
+			last_entry += 1
+			#print self.missing_entries
 
 		# store proposal
 		#print "r: %d size:%d" %(round_no, len(self.ledger))
 		self.ledger[round_no] = chosen_proposal
+		self.ledger.append(None)
+
+	def is_inconsistent(self):
+		return len(self.missing_entries) > 0
 		
 
 	# XXX: debug function
@@ -62,9 +71,9 @@ class Ledger:
 
 	# return true if only if proposal has been decided
 	def lookup_round_num(self, r_num):
-		if len(self.ledger)-1 < r_num:
+		if len(self.ledger) <= r_num:
 			return False
-		return self.ledger[r_num] is None
+		return (self.ledger[r_num] != None)
 
 	# return missing entries to be requested later
 	def get_missing_entries(self):

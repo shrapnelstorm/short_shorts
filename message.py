@@ -5,8 +5,12 @@ class Proposal():
 		
 # base message class
 class Message:
-    def __init__(self, proposal):
-		self.proposal = proposal
+		def __init__(self, proposal):
+			self.proposal = proposal
+
+		def msg_str(self):
+			proposal = self.proposal
+			return str( (proposal.psn, proposal.round_num, proposal.val))
 
 ## message types
 class PrepareMsg(Message):
@@ -19,7 +23,7 @@ class ProposalMsg(Message):
 		Message.__init__(self, proposal)
 class PromiseMsg(Message):
 	def __init__(self, server_id, orig_proposal, accepted_proposal):
-		Message.__init__(self, accepted_proposal)
+		Message.__init__(self, orig_proposal)
 		self.server_id			= server_id
 		self.orig_proposal 		= orig_proposal # proposal number in received Proposal message
 		self.accepted_proposal	= accepted_proposal
@@ -31,8 +35,9 @@ class VoteMsg(Message):
 # Request missing data
 class DecisionRequest(Message):
 		# NOTE: the proposal value doesn't matter in this message, can be ignored
-	def __init__(self, proposal):
+	def __init__(self, sender, proposal):
 		Message.__init__(self, proposal)
+		self.sender = sender
 class DecisionResponse(Message):
 		# NOTE: the proposal value doesn't matter in this message, can be ignored
 	def __init__(self, proposal):

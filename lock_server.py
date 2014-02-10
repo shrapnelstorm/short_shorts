@@ -27,8 +27,8 @@ import ServerData
 # NOTE: use @staticmethod to define a static method
 NUM_SERVERS = 10
 LS_MGR = None
-file_names = ['clients/1.client', 'clients/2.client']
-#file_names = ['clients/simple.client']
+#file_names = ['clients/1.client', 'clients/2.client']
+file_names = ['clients/simple.client']
 
 def get_lock_server():
 	"""returns global LockServer instance"""
@@ -71,7 +71,7 @@ class LockServerManager:
 		self.num_clients        = n_client
 		self.client_server_comm	= [pipe.Pipe() for i in range(n_serv)]
 		self.server_client_comm	= [pipe.Pipe() for i in range(n_client)]
-		self.paxos_comm 		= [pipe.Pipe() for i in range(n_serv)]
+		self.paxos_comm 		= [pipe.Pipe(loss_factor=30) for i in range(n_serv)]
 		self.manager_comm		= Queue.Queue() # just use a regular queue for this
 		self.majority			= int(math.ceil(n_serv/2.0))
 		self.timeout			= 5	 # seconds
@@ -180,26 +180,36 @@ class LockServerThread(Thread):
 
 	# create a prepare message for a given round number
 	def send_prepare_msg(self, cmd):
-		#print "%d sending prepare" % self.id_num
 		# get new psn, create proposal, and send prepare msg
-		r_num 	= max(self.server_data.ledger.max_r_num() + 1, self.server_data.max_r_num_accepted() )
-		new_psn	= get_lock_server().get_psn(r_num)
+		#r_num 	= max(self.server_data.ledger.max_r_num() + 1, self.server_data.max_r_num_accepted() )
+		r_num 	= len(self.server_data.ledger.ledger) - 1
+		psn_fun	= get_lock_server().get_psn(r_num)
+		new_psn	= next(psn_fun)
 		prop	= message.Proposal(new_psn, r_num, cmd)
 		msg		= message.PrepareMsg(self.id_num, prop)
 		self.broadcast_msg(msg)
+		print "%d sent prepare :%s" % (self.id_num, str(msg.proposal))
 	    
 	# create a promise mesage, in response to a prepare
 	def send_promise_msg(self, prep_msg):
 		#print "%d sending promise" % self.id_num
 		# XXX: change server_data to store Proposal objects!!!
+
+		# if receive promise for round with chosen value
+		if self.server_data.ledger.lookup_round_num(prep_msg.proposal.round_num):
+			msg = message.DecisionResponse(self.server_data.ledger.ledger[prep_msg.proposal.round_num])
+			self.paxos_comm[prep_msg.sender].put(msg)
+			return
+			
 		accepted_proposal = self.server_data.lookup_proposal(prep_msg.proposal.round_num)
 		promise = self.server_data.last_promise(prep_msg.proposal.round_num)
 
-		if promise is None or prep_msg.proposal.psn > promise:
+		if promise is None or prep_msg.proposal.psn >= promise:
 			 # respond with original proposal and last accepted proposal for round
 			 self.server_data.update_promises(prep_msg.proposal.round_num, prep_msg.proposal.psn)
 			 msg = message.PromiseMsg(self.id_num, prep_msg.proposal, accepted_proposal)
 			 self.paxos_comm[prep_msg.sender].put(msg)
+			 print "%d sent promise :%s" % (self.id_num, msg.msg_str())
 	        
 	# TODO: list of values?
 	# issue proposal message in response to promise messages
@@ -209,6 +219,9 @@ class LockServerThread(Thread):
 		# storing promise instead of id
 		maj_resp, proposal = self.server_data.prepare_tally.add_vote(promise_msg.orig_proposal, promise_msg)
 		if maj_resp:
+			# clear the votes, so proposal isn't sent again
+			self.server_data.prepare_tally.clear_votes(promise_msg.orig_proposal)
+
 			arr2 = [ v.accepted_proposal for v in self.server_data.prepare_tally.get_votes(proposal)]
 			array = []
 			for i in arr2:
@@ -223,6 +236,7 @@ class LockServerThread(Thread):
 				msg = message.ProposalMsg(promise_msg.orig_proposal)
 
 			self.broadcast_msg(msg)
+			print "%d sent proposal :%s" % (self.id_num, msg.msg_str())
 
 				
 			# XXX: TODO: make sure proposal has value too!!
@@ -244,13 +258,19 @@ class LockServerThread(Thread):
 			msg = message.VoteMsg(self.id_num, prop_msg.proposal)
 			self.broadcast_msg(msg)
 			self.server_data.update_accepted(prop_msg.proposal)
+			print "%d sent vote message :%s" % (self.id_num, msg.msg_str())
             
 ###						HANDLING MESSAGES
 	# TODO: finish implementing this!!!
 	def check_paxos_msgs(self):
 		inbox = self.paxos_comm[self.id_num]
 		if not inbox.empty():
-			self.handle_paxos_msg(inbox.get())
+			msg = inbox.get()
+			#if isinstance(msg, message.PromiseMsg):
+			#	print "%d paxos msg: %s for round %d" % (self.id_num, msg.__class__.__name__, msg.orig_proposal.round_num)
+			#else:
+			#	print "%d paxos msg: %s for round %d" % (self.id_num, msg.__class__.__name__, msg.proposal.round_num)
+			self.handle_paxos_msg(msg)
 
 		# propose client requests
 
@@ -278,31 +298,68 @@ class LockServerThread(Thread):
 	# handle a single received message
 	def handle_paxos_msg(self,msg):
 		if isinstance(msg,message.PrepareMsg): # received prepare, send promise
+			print "########## %d received  prepare:%s" % (self.id_num, msg.msg_str())
 			#print "%d got prepmsg" % self.id_num
 			self.send_promise_msg(msg)
 		elif isinstance(msg,message.PromiseMsg): # received promise, send proposal
-			#print "%d got promise" % self.id_num
+			print "########## %d received  promise:%s" % (self.id_num, msg.msg_str())
 			self.send_proposal_msg(msg)
 		elif isinstance(msg,message.ProposalMsg): # received proposal, send vote
-			#print "%d got proposal" % self.id_num
+			print "########## %d received  proposal:%s" % (self.id_num, msg.msg_str())
 			# issue accept message in response to proposal
 			self.send_vote_msg(msg)
 		elif isinstance(msg,message.VoteMsg): # tally received votes
-			#print "%d got votemsg" % self.id_num
+			print "########## %d received  vote:%s" % (self.id_num, msg.msg_str())
 			# received vote
 			# TODO: fix this, seems incorrect!!
 			self.count_vote_update_ledger(msg)
-		#elif msg_type == DecisionRequest:
-		#elif msg_type == DecisionResponse:
+		elif isinstance(msg,message.DecisionRequest):
+			print "########## %d received  drequest:%s" % (self.id_num, msg.msg_str())
+			r_num = msg.proposal.round_num
+			if self.server_data.ledger.lookup_round_num(r_num):
+				self.send_decision_response(self.server_data.ledger.ledger[r_num], msg)
+		elif isinstance(msg,message.DecisionResponse):
+			print "########## %d received  drespons:%s" % (self.id_num, msg.msg_str())
+
+			# check if entry is in pending
+			if len(self.server_data.pending_requests) != 0 :
+				proposal = msg.proposal
+				pending, timeout = self.server_data.pending_requests[0]
+				if pending == proposal.val:
+					req = self.server_data.pending_requests.pop(0)
+					get_lock_server().server_client_comm[pending[2]].put('cmd accepted')
+
+			# check if entry is missing from ledger
+			if self.server_data.ledger.ledger[msg.proposal.round_num] == None:
+				self.server_data.ledger.ledger[msg.proposal.round_num] = msg.proposal
+				try:
+					self.server_data.ledger.missing_entries.remove(msg.proposal.round_num)
+				except ValueError:
+					return 
+					# do nothing
 
 
+	def send_decision_response(self, proposal, msg):
+		response = message.DecisionResponse(proposal)
+		self.paxos_comm[msg.sender].put(response)
+		print "%d sent  drespons:%s" % (self.id_num, response.msg_str())
+
+	def send_decision_req(self, round_num):
+		msg = message.DecisionRequest( self.id_num, message.Proposal(None, round_num, None))
+		self.broadcast_msg(msg)
+		print "%d sent  dreq:%s" % (self.id_num, msg.msg_str())
 	# TODO: handle paxos msgs too
 	def run(self):
 		time_out = get_lock_server().timeout
 		while True:
 			self.check_paxos_msgs()
 			
-			#print "pending messages %d " % len(self.server_data.pending_requests)
+			if self.server_data.ledger.is_inconsistent():
+			#	print self.server_data.ledger.missing_entries
+				r_num = self.server_data.ledger.missing_entries[0]
+				self.send_decision_req(r_num)
+				print "pending messages %d " % len(self.server_data.pending_requests)
+				continue
 			if not self.client_comm.empty() or len(self.server_data.pending_requests) > 0:
 				#print "checking pending"
 				#print "%d received message" % self.id_num
