@@ -79,7 +79,16 @@ class LockServerManager:
 
 		# maps round_no --> psn generator
 		self.psns = dict() # an empty dictionary of unique psns 
+
+		# TODO: DELETE this later
+		self.print_lock =	threading.Lock()
 	
+	def print_ledger(self, ledger, server):
+		self.print_lock.acquire()
+		print " ledger for %d" % server
+		ledger.print_ledger()
+		self.print_lock.release()
+
 	def create_instances(self):
 		# run the required number of lock servers
 		print " num servers is %d" % self.num_servers
@@ -208,7 +217,7 @@ class LockServerThread(Thread):
 			val_exists, val = majority(array,get_lock_server().majority)
 			if val_exists and val is not None:
 				# create copy of proposal with majority value
-				prop = Proposal( promise_msg.orig_proposal.psn, promise_msg.orig_proposal.round_num, val)
+				prop = message.Proposal( promise_msg.orig_proposal.psn, promise_msg.orig_proposal.round_num, val)
 				msg = message.ProposalMsg(prop)
 			else:
 				msg = message.ProposalMsg(promise_msg.orig_proposal)
@@ -250,10 +259,13 @@ class LockServerThread(Thread):
 	# handle received messages by type
 		maj_resp, proposal = self.server_data.accept_tally.add_vote(vote_msg.proposal, vote_msg.voter_id)
 
+		# we either have the proposal, or will request it later
+		#if len(self.server_data.ledger.ledger) >= proposal.round_num:
+			#return
 		if maj_resp:
 			self.server_data.ledger.update_ledger(proposal)
-			print " ledger for %d" % self.id_num
-			self.server_data.ledger.print_ledger()
+			get_lock_server().print_ledger(self.server_data.ledger, self.id_num)
+			print "%d has this many votes %d" % (self.id_num, len(self.server_data.accept_tally.counts[proposal]) )
 			if len(self.server_data.pending_requests) == 0 :
 				return
 			# update pending requests if there are any
@@ -290,10 +302,15 @@ class LockServerThread(Thread):
 		while True:
 			self.check_paxos_msgs()
 			
-			while not self.client_comm.empty():
+			#print "pending messages %d " % len(self.server_data.pending_requests)
+			if not self.client_comm.empty() or len(self.server_data.pending_requests) > 0:
+				#print "checking pending"
 				#print "%d received message" % self.id_num
-				cmd = self.client_comm.get()
-				self.server_data.pending_requests.append((cmd,None))
+
+				# get new messages from queue
+				if not self.client_comm.empty():
+					cmd = self.client_comm.get()
+					self.server_data.pending_requests.append((cmd,None))
 				# find round number and make_proposal()
 
 				r = self.server_data.pending_requests.pop(0)
@@ -301,6 +318,8 @@ class LockServerThread(Thread):
 				if(r[1] is None or r[1] < current_time):
 					r = (r[0],  current_time + time_out)
 					self.send_prepare_msg(r[0])
+					self.server_data.pending_requests.insert(0,r)
+				else:
 					self.server_data.pending_requests.insert(0,r)
 
 			# propose command

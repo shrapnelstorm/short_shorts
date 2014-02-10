@@ -1,4 +1,4 @@
-sleep 5
+sleep 3
 obtain_lock 5
 obtain_lock 6 
 release_lock 5 
