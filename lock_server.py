@@ -18,7 +18,7 @@ from threading import Thread
 
 
 # helper files
-#import countvotes
+from countvotes import majority
 import message
 import pipe
 import ServerData
@@ -27,12 +27,14 @@ import ServerData
 # NOTE: use @staticmethod to define a static method
 NUM_SERVERS = 10
 LS_MGR = None
+file_names = ['clients/1.client', 'clients/2.client']
+#file_names = ['clients/simple.client']
 
 def get_lock_server():
 	"""returns global LockServer instance"""
 	global LS_MGR
 	if LS_MGR is None:
-		LS_MGR = LockServerManager(10) # system replicated 10 times
+		LS_MGR = LockServerManager(5, len(file_names)) # system replicated 10 times
 	return LS_MGR
 
 ## TODO: the above may not be necessary
@@ -72,18 +74,17 @@ class LockServerManager:
 		self.paxos_comm 		= [pipe.Pipe() for i in range(n_serv)]
 		self.manager_comm		= Queue.Queue() # just use a regular queue for this
 		self.majority			= int(math.ceil(n_serv/2.0))
+		self.timeout			= 5	 # seconds
 
 
 		# maps round_no --> psn generator
 		self.psns = dict() # an empty dictionary of unique psns 
-
-		# create instances
-		self.create_instances()
 	
 	def create_instances(self):
 		# run the required number of lock servers
+		print " num servers is %d" % self.num_servers
 		for i in range(self.num_servers):
-			LockServerThread(i, self.paxos_comm, self.server_client_comm[i], self.manager_comm).start()
+			LockServerThread(i, self.paxos_comm, self.client_server_comm[i], self.manager_comm).start()
 
 	@staticmethod
 	def init_new_server(server_id, paxos_comm, sc_comm, man_comm, timeout=0):
@@ -99,7 +100,7 @@ class LockServerManager:
 			# if server has failed, wait a timeout period and initialize a new server
 			if not self.manager_comm.empty():
 				s_id, timeout = self.manager_comm.get()
-				Thread(target=LockServerManager.init_new_server, args=(int(s_id), self.paxos_comm, self.server_client_comm[s_id], self.manager_comm,timeout)).start()
+				Thread(target=LockServerManager.init_new_server, args=(int(s_id), self.paxos_comm, self.client_server_comm[s_id], self.manager_comm,timeout)).start()
 	
 	def run(self):
 		self.manage_servers()
@@ -122,14 +123,13 @@ class LockServerThread(Thread):
 	def __init__(self, id_num, paxos_comm, client_comm, manager_comm, fail_rate=0):
 		Thread.__init__(self)
 
-		print id_num
 		# initialize data fields
 		self.id_num = id_num
 		self.paxos_comm = paxos_comm
 		self.client_comm = client_comm
 		self.manager_comm = manager_comm
 		#self.ledger = []
-		self.server_data = ServerData.ServerData(id_num)
+		self.server_data = ServerData.ServerData(id_num, get_lock_server().majority)
 		self.fail_rate = fail_rate
 		#self.maj_threshold = maj_threshold
 
@@ -155,23 +155,14 @@ class LockServerThread(Thread):
 ###						SENDING MESSAGES 
 	# send a message to every other node
 	# TODO: do we want to send to self also?
-	def broadcast_msg(msg):
+	def broadcast_msg(self, msg):
 		for idx, comm in  enumerate(self.paxos_comm): 
-			comm.put(result)
+			comm.put(msg)
 
 	# TODO: if have time, implement dedicated learner
 	def send_to_learner(self, msg):
 		self.broadcast_msg(msg)
 	
-	# TODO: change update to use new message types
-	def update_ledger(self,round_no,list_val,psn):
-		return "unimplemented"
-		#maj = majority(list_val,self.maj_threshold)
-		#if maj[0] == 1: 
-		## update ledger
-		#	entry = Ledger(round_no, maj[1].psn, maj[1].val, maj[1].cmd, maj[1].client)
-		#	self.server_data.update_ledger(round_no, entry)
-
 		# TODO: request missing data
 		#if inconsistent(round_no):
 			# update required
@@ -179,110 +170,139 @@ class LockServerThread(Thread):
 ###						GENERATING MESSAGES
 
 	# create a prepare message for a given round number
-	def send_prepare_msg(self, cmd, r_num):
+	def send_prepare_msg(self, cmd):
+		#print "%d sending prepare" % self.id_num
 		# get new psn, create proposal, and send prepare msg
+		r_num 	= max(self.server_data.ledger.max_r_num() + 1, self.server_data.max_r_num_accepted() )
 		new_psn	= get_lock_server().get_psn(r_num)
-		prop	= Proposal(new_psn, r_num, cmd)
-		msg		= PrepareMsg(self.id_num, prop)
+		prop	= message.Proposal(new_psn, r_num, cmd)
+		msg		= message.PrepareMsg(self.id_num, prop)
 		self.broadcast_msg(msg)
 	    
 	# create a promise mesage, in response to a prepare
 	def send_promise_msg(self, prep_msg):
+		#print "%d sending promise" % self.id_num
 		# XXX: change server_data to store Proposal objects!!!
-		accepted_proposal = self.server_data.highest_accepted(round_no)
+		accepted_proposal = self.server_data.lookup_proposal(prep_msg.proposal.round_num)
+		promise = self.server_data.last_promise(prep_msg.proposal.round_num)
 
-		if prep_msg.proposal.psn > accepted_proposal.psn:
+		if promise is None or prep_msg.proposal.psn > promise:
 			 # respond with original proposal and last accepted proposal for round
-			 msg = PromiseMsg(self.id_num, prep_msg.proposal, accepted_proposal)
+			 self.server_data.update_promises(prep_msg.proposal.round_num, prep_msg.proposal.psn)
+			 msg = message.PromiseMsg(self.id_num, prep_msg.proposal, accepted_proposal)
 			 self.paxos_comm[prep_msg.sender].put(msg)
 	        
 	# TODO: list of values?
 	# issue proposal message in response to promise messages
 	def send_proposal_msg(self, promise_msg):
-		# 				old code
-		#ls = self.update_majority(promise_msg, self.majority) ### TODO: fix this code to use new MSG types
-		#maj = majority(ls,self.maj_threshold)
-		#if maj[0] == 0: return None
-		#else:
-			# XXX: TODO: cleanup this code, hard to understand
-		#	msg = Message('proposal',psn,maj[1],round_no,maj[1][0],maj[1][1])
-		#	self.broadcast_msg(new_msg)
-		if self.server_data.prepare_tally.add_vote(promise_msg.orig_proposal, promise_msg.server_id):
+		#print "%d sending proposal" % self.id_num
+
+		# storing promise instead of id
+		maj_resp, proposal = self.server_data.prepare_tally.add_vote(promise_msg.orig_proposal, promise_msg)
+		if maj_resp:
+			arr2 = [ v.accepted_proposal for v in self.server_data.prepare_tally.get_votes(proposal)]
+			array = []
+			for i in arr2:
+				if i != None:
+					array.append(i.val)
+			val_exists, val = majority(array,get_lock_server().majority)
+			if val_exists and val is not None:
+				# create copy of proposal with majority value
+				prop = Proposal( promise_msg.orig_proposal.psn, promise_msg.orig_proposal.round_num, val)
+				msg = message.ProposalMsg(prop)
+			else:
+				msg = message.ProposalMsg(promise_msg.orig_proposal)
+
+			self.broadcast_msg(msg)
+
+				
 			# XXX: TODO: make sure proposal has value too!!
 			# TODO: after sending proposal, clear tally
-			msg = ProposalMsg(promise_msg.orig_proposal)
 
 	    
 	## TODO: fix server data
 	## This logic seems incorrect. We should be checking if a value has been chosen too (in ledger)
 	def send_vote_msg(self, prop_msg):
+		#print "%d sending vote" % self.id_num
 		msg = None
-		last_accepted_psn = self.server_Data.highest_accepted(prop_msg.proposal.round_no)[0]
-		if prop_msg.proposal.psn >= last_accepted_psn:
-			msg = VoteMsg(self.id_num, prop_msg.proposal)
-		## why do we want to do this??
-		elif message.val == self.server_Data.highest_accepted(message.round_no)[1]:
-			msg = VoteMsg(self.id_num,prop_msg.proposal)
+		last_promise = self.server_data.last_promise(prop_msg.proposal.round_num)
 
-		if not (msg is None):
-			self.send_to_learner(msg)
+		# value is already in ledger for this round
+		if self.server_data.ledger.lookup_round_num(prop_msg.proposal.round_num):
+			return
+
+		if last_promise is None or prop_msg.proposal.psn >= last_promise:
+			msg = message.VoteMsg(self.id_num, prop_msg.proposal)
+			self.broadcast_msg(msg)
+			self.server_data.update_accepted(prop_msg.proposal)
             
 ###						HANDLING MESSAGES
 	# TODO: finish implementing this!!!
 	def check_paxos_msgs(self):
 		inbox = self.paxos_comm[self.id_num]
 		if not inbox.empty():
-			handle_paxos_msg(inbox.get())
+			self.handle_paxos_msg(inbox.get())
 
 		# propose client requests
 
 	# TODO: empty dictionary once a majority is reached
-	def update_majority(self, msg, hmap):
+	def count_vote_update_ledger(self, vote_msg):
 	# handle received messages by type
-		entry = (msg.round_no, msg.psn)
-		if hmap[entry] is None:
-			hmap[entry] = [msg]
-		else:
-			hmap[entry] = hmap[entry] + [msg]
-		return hmap[entry]
+		maj_resp, proposal = self.server_data.accept_tally.add_vote(vote_msg.proposal, vote_msg.voter_id)
+
+		if maj_resp:
+			self.server_data.ledger.update_ledger(proposal)
+			print " ledger for %d" % self.id_num
+			self.server_data.ledger.print_ledger()
+			if len(self.server_data.pending_requests) == 0 :
+				return
+			# update pending requests if there are any
+			pending, timeout = self.server_data.pending_requests[0]
+			if pending == proposal.val:
+				req = self.server_data.pending_requests.pop(0)
+				get_lock_server().server_client_comm[pending[2]].put('cmd accepted')
 
 
 	# handle a single received message
 	def handle_paxos_msg(self,msg):
-		msg_type = type(msg)
-		if msg_type == PrepareMsg: # received prepare, send promise
-			self.send_promise_msg(msg.round_no, msg.psn)
-		elif msg_type == PromiseMsg: # received promise, send proposal
-			self.send_proposal_msg(msg.round_no, ls, msg.orig_psn)
-		elif msg_type == ProposalMsg: # received proposal, send vote
+		if isinstance(msg,message.PrepareMsg): # received prepare, send promise
+			#print "%d got prepmsg" % self.id_num
+			self.send_promise_msg(msg)
+		elif isinstance(msg,message.PromiseMsg): # received promise, send proposal
+			#print "%d got promise" % self.id_num
+			self.send_proposal_msg(msg)
+		elif isinstance(msg,message.ProposalMsg): # received proposal, send vote
+			#print "%d got proposal" % self.id_num
 			# issue accept message in response to proposal
 			self.send_vote_msg(msg)
-		elif msg_type == VoteMsg: # tally received votes
+		elif isinstance(msg,message.VoteMsg): # tally received votes
+			#print "%d got votemsg" % self.id_num
 			# received vote
 			# TODO: fix this, seems incorrect!!
-			ls = self.update_majority(msg, self.chosen_values)
+			self.count_vote_update_ledger(msg)
 		#elif msg_type == DecisionRequest:
 		#elif msg_type == DecisionResponse:
 
 
 	# TODO: handle paxos msgs too
-	def run(self,time_out):
+	def run(self):
+		time_out = get_lock_server().timeout
 		while True:
 			self.check_paxos_msgs()
 			
 			while not self.client_comm.empty():
-				print "%d received message" % self.id_num
+				#print "%d received message" % self.id_num
 				cmd = self.client_comm.get()
 				self.server_data.pending_requests.append((cmd,None))
 				# find round number and make_proposal()
 
-            r = pending_request.pop(0)
-            current_time = time()
-            if(r[1] is None or r[1] < current_time):
-                r[1] = current_time + self.time_out
-                self.send_prepare_msg(r[0])
-                pending_request.insert(0,r)
-                
+				r = self.server_data.pending_requests.pop(0)
+				current_time = time()
+				if(r[1] is None or r[1] < current_time):
+					r = (r[0],  current_time + time_out)
+					self.send_prepare_msg(r[0])
+					self.server_data.pending_requests.insert(0,r)
+
 			# propose command
 		# TODO: delete this test code
 		#if self.id_num == 9:
@@ -323,9 +343,11 @@ class Client(Thread):
         self.servers[rand_server].put(cmd)
         
     def read_from_server(self):
-        r = self.client_pipe.get()
-        while not r is None:
-            r = self.client_pipe.get()
+			r = self.client_pipe.get()
+			#print r
+			while (r == None):
+				r = self.client_pipe.get()
+			#print " r after loop " + str(r)
 
     def run(self):
 			instrs = self.read_inst()
@@ -338,22 +360,22 @@ class Client(Thread):
 				else :
 					self.send_to_server(cmd)
 					self.read_from_server()
-			print "done"
+			#print "done %d" % self.id_num
 
 def spawn_clients(num,file_names):
      for i in range(num):
-        print "spawning client"
+        #print "spawning client"
         client = Client(i, file_names[i]).start()
 
 ############################################################	
 ## Desc:		 MAIN FUNCTION
 ############################################################	
 # code to test lock server and manager class
-file_names = ['clients/1.client', 'clients/2.client']
+#file_names = ['clients/1.client', 'clients/2.client']
 
 # get lock server
-ls = LockServerManager(10,len(fine_names))
-LS_MGR = ls
+ls = get_lock_server()
+ls.create_instances()
 spawn_clients(len(file_names), file_names)
 ls.run()
 
