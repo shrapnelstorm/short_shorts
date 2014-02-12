@@ -45,26 +45,30 @@ class Ledger:
 	def update_ledger(self, chosen_proposal):
 		round_no = chosen_proposal.round_num
 		last_entry = len(self.ledger) 
+		# successful update
 		if round_no < last_entry-1:
 			self.ledger[round_no] = chosen_proposal
 			return
-		# make room for new entry if needed, & record missing entries
+
+		# make room for new entry then insert it
 		while last_entry <= round_no:
 			self.ledger.append(None)
-			if last_entry > 0 and round_no != last_entry and self.ledger[last_entry] == None:
-				self.missing_entries.append(last_entry)
 			last_entry += 1
 			#print self.missing_entries
+
+		# check for missing entries, and add them
 		for i in range(1,round_no):
 			if self.ledger[i] == None:
 				if i not in self.missing_entries:
 					self.missing_entries.append(i) 
-		# store proposal
-		#print "r: %d size:%d" %(round_no, len(self.ledger))
+
+		# increase ledger size, if the update occurs for the first time
+		# NOTE: ledger length determines round number
 		if self.ledger[round_no] == None:
 		    self.ledger.append(None)
+
+		# update ledger
 		self.ledger[round_no] = chosen_proposal
-		#self.ledger.append(None)
 
 	def is_inconsistent(self):
 		return len(self.missing_entries) > 0

@@ -71,7 +71,7 @@ class LockServerManager:
 		self.num_clients        = n_client
 		self.client_server_comm	= [pipe.Pipe() for i in range(n_serv)]
 		self.server_client_comm	= [pipe.Pipe() for i in range(n_client)]
-		self.paxos_comm 		= [pipe.Pipe(loss_factor=20) for i in range(n_serv)]
+		self.paxos_comm 		= [pipe.Pipe(loss_factor=30) for i in range(n_serv)]
 		self.manager_comm		= Queue.Queue() # just use a regular queue for this
 		self.majority			= int(math.ceil(n_serv/2.0))
 		self.timeout			= 5	 # seconds
@@ -295,10 +295,9 @@ class LockServerThread(Thread):
 	# handle received messages by type
 		maj_resp, proposal = self.server_data.accept_tally.add_vote(vote_msg.proposal, vote_msg.voter_id)
 
-		# we either have the proposal, or will request it later
-		#if len(self.server_data.ledger.ledger) >= proposal.round_num:
-			#return
 		if maj_resp:
+			# remove majority from accept_tally
+			#self.server_data.accept_tally.clear_votes(vote_msg.proposal)
 			self.server_data.ledger.update_ledger(proposal)
 			get_lock_server().print_ledger(self.server_data.ledger, self.id_num)
 			print "%d has this many votes %d" % (self.id_num, len(self.server_data.accept_tally.counts[proposal]) )
@@ -366,47 +365,36 @@ class LockServerThread(Thread):
 		# don't send to self
 		self.broadcast_to_others(msg)
 		print "%d sent  dreq:%s" % (self.id_num, msg.msg_str())
-	# TODO: handle paxos msgs too
+	
 	def run(self):
 		time_out = get_lock_server().timeout
 		while True:
 			self.check_paxos_msgs()
 			
+			# check ledger consistency
 			if self.server_data.ledger.is_inconsistent() and self.dreq_timeout < time():
 				self.dreq_timeout = time() + 2 # wait at least 2 sec
-			#	print self.server_data.ledger.missing_entries
 				r_num = self.server_data.ledger.missing_entries[0]
 				self.send_decision_req(r_num)
-				print "pending messages %d " % len(self.server_data.pending_requests)
-				#continue
-			if not self.client_comm.empty() or len(self.server_data.pending_requests) > 0:
-				#print "checking pending"
-				#print "%d received message" % self.id_num
 
-				# get new messages from queue
+			# check pending client requests, and issue prepare msgs
+			if not self.client_comm.empty() or len(self.server_data.pending_requests) > 0:
+
+				# get new messages from queue, add to pending
 				if not self.client_comm.empty():
 					cmd = self.client_comm.get()
-					req = cmd,None
+					req = cmd,None # (cmd, timeout)
 					self.server_data.pending_requests.append(req)
-				# find round number and make_proposal()
 
+				# check if last request's timeout has expired
 				r = self.server_data.pending_requests.pop(0)
 				current_time = time()
-				if(r[1] is None or r[1] < current_time):
+				if(r[1] is None or r[1] < current_time): # timeout expired, or request not issued 
 					r = (r[0],  current_time + time_out)
 					self.send_prepare_msg(r[0])
 					self.server_data.pending_requests.insert(0,r)
 				else:
 					self.server_data.pending_requests.insert(0,r)
-
-			# propose command
-		# TODO: delete this test code
-		#if self.id_num == 9:
-		#	time.sleep(1)
-		#	self.manager_comm.put((self.id_num, 5))
-
-		return "unimplemented"
-
         
 
 ############################################################	
