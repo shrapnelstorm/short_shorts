@@ -6,6 +6,7 @@ import message
 
 # TODO: add some lock consistency code if have time
 class Lock_Status:
+	# status = 'obtained' or 'free'
     def __init__(self,status,client_no):
         self.status = status
         self.client_no = client_no
@@ -103,6 +104,9 @@ class Ledger:
 			return 0
 		return max(ls)
         
+# global array of all locks
+locks = [i for i in range(1,15)]
+
 # stores all persistent data for each server
 class ServerData:
 	def __init__(self, server_id, majority):
@@ -116,9 +120,17 @@ class ServerData:
 			self.promises			= {} 
 			self.pending_requests	= [] # will be accessed directly
 
+
 		# this data is not persistent
 		self.prepare_tally			= VoteTally(majority)
 		self.accept_tally			= VoteTally(majority)
+
+		# lock statuses
+		self.lock_statuses		= {}
+		for i in locks:
+			self.lock_statuses[i] = Lock_Status('free', 0)
+			print " the lock status for %d" % i
+			print self.lock_statuses[i].status
 
 	# save and load functions for backup
 	def save(self):
@@ -152,13 +164,19 @@ class ServerData:
 		return self.promises.setdefault(round_num, None)
 	    
 	# checks if a specific instruction is there in the ledger
-	def search_ledger(self, instr,lock_no):
-		for i in range(len(self.ledger)-1,0,-1):
-			if self.ledger[i]!=None and self.ledger[i].val[0] == instr and self.ledger[i].val[1] == lock_no:
-				return True	    
-		if self.Ledger == [None,None]:
-			return True
-		return False
+	def lookup_lock_status(self, lock_no):
+		return (self.lock_statuses[int(lock_no)].status )
+
+	def update_lock_status(self, lock_no, status):
+		self.lock_statuses[int(lock_no)].status = status
+		#print "lock status of %s changed to %s" % (lock_no, status)
+
+		#for i in range(len(self.ledger)-1,0,-1):
+		#	if self.ledger[i]!=None and self.ledger[i].val[0] == instr and self.ledger[i].val[1] == lock_no:
+		#		return True	    
+		#if self.Ledger == [None,None]:
+		#	return True
+		#return False
 
 		
 ## fix these tests!!!

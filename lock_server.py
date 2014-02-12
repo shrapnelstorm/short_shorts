@@ -29,9 +29,10 @@ NUM_SERVERS = 10
 LS_MGR = None
 file_names = ['clients/1.client', 'clients/2.client']
 #file_names = ['clients/simple.client']
+#file_names = ['clients/3.client']
 
 #(i,j) specifies the node i fails after time j 
-nodes_tofail = [(0,0)]
+nodes_tofail = [(0,0),(1,0)]
 
 #function that spawns the nodes of a distributed system
 def get_lock_server():
@@ -156,7 +157,7 @@ class LockServerThread(Thread):
 		self.dreq_timeout = 0
 
 		# printing output
-		self.debug_level = 2 # handles output verbosity 0:none, 1:just ledgers, 2:all
+		self.debug_level = 1 # handles output verbosity 0:none, 1:just ledgers, 2:all
 
 	
 	# will run the paxos protocol
@@ -295,6 +296,12 @@ class LockServerThread(Thread):
 		maj_resp, proposal = self.server_data.accept_tally.add_vote(vote_msg.proposal, vote_msg.voter_id)
 
 		if maj_resp:
+			# update lock status, depending on message type
+			if proposal.val[0] == 'obtain_lock':
+				self.server_data.update_lock_status(proposal.val[1], 'obtained')
+			else:
+				self.server_data.update_lock_status(proposal.val[1], 'free')
+
 			# remove majority from accept_tally
 			self.server_data.accept_tally.clear_votes(vote_msg.proposal)
 			self.server_data.ledger.update_ledger(proposal)
@@ -348,6 +355,11 @@ class LockServerThread(Thread):
 
 			# check if entry is missing from ledger
 			if self.server_data.ledger.ledger[msg.proposal.round_num] == None:
+				if msg.proposal.val[0] == 'obtain_lock':
+					self.server_data.update_lock_status(msg.proposal.val[1], 'obtained')
+				else:
+					self.server_data.update_lock_status(msg.proposal.val[1], 'free')
+
 				self.server_data.ledger.update_ledger(msg.proposal)
 				get_lock_server().print_ledger(self.server_data.ledger, self.id_num)
 				try:
@@ -372,13 +384,16 @@ class LockServerThread(Thread):
 	# the main function
 	def run(self):
 		time_out = get_lock_server().timeout
-		for i in nodes_tofail:
-			if i[0] == self.id_num:
-				if time() > i[1]:
-					print str(self.id_num) + " is about to fail....."
-					return
 						#print "I die now..."
 		while True:
+			# fail if necessary
+			for i in nodes_tofail:
+				if i[0] == self.id_num:
+					if time() > i[1]:
+						print str(self.id_num) + " is about to fail....."
+						return
+
+			# check paxos messages
 			self.check_paxos_msgs()
 			
 			# check ledger consistency
@@ -386,12 +401,13 @@ class LockServerThread(Thread):
 				self.dreq_timeout = time() + 2 # wait at least 2 sec
 				r_num = self.server_data.ledger.missing_entries[0]
 				self.send_decision_req(r_num)
+				continue
 
 			# check pending client requests, and issue prepare msgs
 			if not self.client_comm.empty() or len(self.server_data.pending_requests) > 0:
 
-				print "the pending requests"
-				print self.server_data.pending_requests
+				#print "the pending requests"
+				#print self.server_data.pending_requests
 				# get new messages from queue, add to pending
 				if not self.client_comm.empty():
 					cmd = self.client_comm.get()
@@ -400,6 +416,15 @@ class LockServerThread(Thread):
 
 				# check if last request's timeout has expired
 				r = self.server_data.pending_requests.pop(0)
+
+				#print self.server_data.lookup_lock_status(r[0][1]) 
+				# lock is unavailable, put back in queue and continue
+				if r[0][0] == 'obtain_lock' and self.server_data.lookup_lock_status(r[0][1]) == 'obtained':
+					# need to push lock to end, to avoid deadlocks
+					self.server_data.pending_requests.append(r)
+					#print "unavailable lock requested"
+					continue # lock is not available
+
 				current_time = time()
 				if(r[1] is None or r[1] < current_time): # timeout expired, or request not issued 
 					r = (r[0],  current_time + time_out)
@@ -426,6 +451,13 @@ class Client(Thread):
         # communication channel to recieve messages from the server
         self.client_pipe = self.ls_mgr.server_client_comm[id_num]
 
+        # initialize list of available servers
+        self.available_servers = []
+        failing_nodes = [ i for (i,j) in nodes_tofail]
+        for i in range(self.ls_mgr.num_servers):
+        	if i not in failing_nodes:
+        		self.available_servers.append(i)
+
     
     def read_inst(self):
         f = open(self.filename)
@@ -439,7 +471,11 @@ class Client(Thread):
 
 	# write a message to the server queue
     def send_to_server(self, cmd):
-        rand_server = random.randint(0,self.ls_mgr.num_servers - 1)
+        print "available servers are:"
+        print self.available_servers
+        self.available_servers
+        rand_idx = random.randint(0,len(self.available_servers) -1)
+        rand_server = self.available_servers[rand_idx]
         self.servers[rand_server].put(cmd)
         
     def read_from_server(self):
