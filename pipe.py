@@ -62,20 +62,21 @@ class Pipe:
 	def put(self, msg):
 		# apply loss factor first
 		r_value = random.randint(0,100)
-		if  r_value < self.loss_factor :
-			if isinstance(msg,message.PrepareMsg): # received prepare, send promise
-				print "++++++++++++++++++ LOST  prepare:%s" % (msg.msg_str())
-			elif isinstance(msg,message.PromiseMsg): # received promise, send proposal
-				print "++++++++++++++++++ LOST  promise:%s" % (msg.msg_str())
-			elif isinstance(msg,message.ProposalMsg): # received proposal, send vote
-				print "++++++++++++++++++ LOST  proposal:%s" % (msg.msg_str())
-			elif isinstance(msg,message.VoteMsg): # tally received votes
-				print "++++++++++++++++++ LOST  vote:%s" % (msg.msg_str())
-			elif isinstance(msg,message.DecisionRequest):
-				print "++++++++++++++++++ LOST  drequest:%s" % (msg.msg_str())
-			elif isinstance(msg,message.DecisionResponse):
-				print "++++++++++++++++++ LOST  drespons:%s" % (msg.msg_str())
-			return
+		# print loss messages
+		#if  r_value < self.loss_factor :
+			#if isinstance(msg,message.PrepareMsg): # received prepare, send promise
+			#	print "++++++++++++++++++ LOST  prepare:%s" % (msg.msg_str())
+			#elif isinstance(msg,message.PromiseMsg): # received promise, send proposal
+			#	print "++++++++++++++++++ LOST  promise:%s" % (msg.msg_str())
+			#elif isinstance(msg,message.ProposalMsg): # received proposal, send vote
+			#	print "++++++++++++++++++ LOST  proposal:%s" % (msg.msg_str())
+			#elif isinstance(msg,message.VoteMsg): # tally received votes
+			#	print "++++++++++++++++++ LOST  vote:%s" % (msg.msg_str())
+			#elif isinstance(msg,message.DecisionRequest):
+			#	print "++++++++++++++++++ LOST  drequest:%s" % (msg.msg_str())
+			#elif isinstance(msg,message.DecisionResponse):
+			#	print "++++++++++++++++++ LOST  drespons:%s" % (msg.msg_str())
+			#return
 		self.queue.put(msg)
 		
 #x = Pipe()

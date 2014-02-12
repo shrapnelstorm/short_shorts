@@ -84,18 +84,17 @@ class LockServerManager:
 		self.psn_lock = threading.Lock()
 		self.psn_next = 0
 
-		# TODO: DELETE this later
+		# lock to print ledger
 		self.print_lock =	threading.Lock()
 	
 	def print_ledger(self, ledger, server):
 		self.print_lock.acquire()
-		print " ledger for %d" % server
+		print "\nledger for %d" % server
 		ledger.print_ledger()
 		self.print_lock.release()
 
 	def create_instances(self):
 		# run the required number of lock servers
-		print " num servers is %d" % self.num_servers
 		for i in range(self.num_servers):
 			LockServerThread(i, self.paxos_comm, self.client_server_comm[i], self.manager_comm).start()
 
@@ -131,8 +130,6 @@ class LockServerManager:
 		
 		
 
-NUM_LOCKS = 15
-
 # server states
 #prep_req, propose, vote_received,
 class LockServerThread(Thread): 
@@ -146,17 +143,18 @@ class LockServerThread(Thread):
 		self.paxos_comm = paxos_comm
 		self.client_comm = client_comm
 		self.manager_comm = manager_comm
-		#self.ledger = []
 		self.server_data = ServerData.ServerData(id_num, get_lock_server().majority)
 		self.fail_rate = fail_rate
-		#self.maj_threshold = maj_threshold
 
 		self.majority= {}
 		self.chosen_values = {}
 		self.pending_requests = []
 
-		# drequest timeouts
+		# drequest timeout so we don't make drequests too often
 		self.dreq_timeout = 0
+
+		# printing output
+		self.debug_level = 1 # handles output verbosity 0:none, 1:just ledgers, 2:all
 
 	
 	# will run the paxos protocol
@@ -204,7 +202,7 @@ class LockServerThread(Thread):
 		prop	= message.Proposal(new_psn, r_num, cmd)
 		msg		= message.PrepareMsg(self.id_num, prop)
 		self.broadcast_msg(msg)
-		print "%d sent prepare :%s" % (self.id_num, str(msg.proposal))
+		if self.debug_level >= 2: print "%d sent prepare :%s" % (self.id_num, str(msg.proposal))
 	    
 	# create a promise mesage, in response to a prepare
 	def send_promise_msg(self, prep_msg):
@@ -225,7 +223,7 @@ class LockServerThread(Thread):
 			 self.server_data.update_promises(prep_msg.proposal.round_num, prep_msg.proposal.psn)
 			 msg = message.PromiseMsg(self.id_num, prep_msg.proposal, accepted_proposal)
 			 self.paxos_comm[prep_msg.sender].put(msg)
-			 print "%d sent promise :%s" % (self.id_num, msg.msg_str())
+			 if self.debug_level >= 2: print "%d sent promise :%s" % (self.id_num, msg.msg_str())
 	        
 	# TODO: list of values?
 	# issue proposal message in response to promise messages
@@ -252,7 +250,7 @@ class LockServerThread(Thread):
 				msg = message.ProposalMsg(promise_msg.orig_proposal)
 
 			self.broadcast_msg(msg)
-			print "%d sent proposal :%s" % (self.id_num, msg.msg_str())
+			if self.debug_level >= 2: print "%d sent proposal :%s" % (self.id_num, msg.msg_str())
 
 				
 			# XXX: TODO: make sure proposal has value too!!
@@ -274,7 +272,7 @@ class LockServerThread(Thread):
 			msg = message.VoteMsg(self.id_num, prop_msg.proposal)
 			self.broadcast_msg(msg)
 			self.server_data.update_accepted(prop_msg.proposal)
-			print "%d sent vote message :%s" % (self.id_num, msg.msg_str())
+			if self.debug_level >= 2: print "%d sent vote message :%s" % (self.id_num, msg.msg_str())
             
 ###						HANDLING MESSAGES
 	# TODO: finish implementing this!!!
@@ -282,10 +280,6 @@ class LockServerThread(Thread):
 		inbox = self.paxos_comm[self.id_num]
 		if not inbox.empty():
 			msg = inbox.get()
-			#if isinstance(msg, message.PromiseMsg):
-			#	print "%d paxos msg: %s for round %d" % (self.id_num, msg.__class__.__name__, msg.orig_proposal.round_num)
-			#else:
-			#	print "%d paxos msg: %s for round %d" % (self.id_num, msg.__class__.__name__, msg.proposal.round_num)
 			self.handle_paxos_msg(msg)
 
 		# propose client requests
@@ -297,10 +291,13 @@ class LockServerThread(Thread):
 
 		if maj_resp:
 			# remove majority from accept_tally
-			#self.server_data.accept_tally.clear_votes(vote_msg.proposal)
+			self.server_data.accept_tally.clear_votes(vote_msg.proposal)
 			self.server_data.ledger.update_ledger(proposal)
-			get_lock_server().print_ledger(self.server_data.ledger, self.id_num)
-			print "%d has this many votes %d" % (self.id_num, len(self.server_data.accept_tally.counts[proposal]) )
+
+			# print ledger for debugging purposes
+			if self.debug_level >= 1: get_lock_server().print_ledger(self.server_data.ledger, self.id_num)
+
+			#print "%d has this many votes %d" % (self.id_num, len(self.server_data.accept_tally.counts[proposal]) )
 			if len(self.server_data.pending_requests) == 0 :
 				return
 			# update pending requests if there are any
@@ -313,28 +310,28 @@ class LockServerThread(Thread):
 	# handle a single received message
 	def handle_paxos_msg(self,msg):
 		if isinstance(msg,message.PrepareMsg): # received prepare, send promise
-			print "########## %d received  prepare:%s" % (self.id_num, msg.msg_str())
+			if self.debug_level >= 2: print "########## %d received  prepare:%s" % (self.id_num, msg.msg_str())
 			#print "%d got prepmsg" % self.id_num
 			self.send_promise_msg(msg)
 		elif isinstance(msg,message.PromiseMsg): # received promise, send proposal
-			print "########## %d received  promise:%s" % (self.id_num, msg.msg_str())
+			if self.debug_level >= 2: print "########## %d received  promise:%s" % (self.id_num, msg.msg_str())
 			self.send_proposal_msg(msg)
 		elif isinstance(msg,message.ProposalMsg): # received proposal, send vote
-			print "########## %d received  proposal:%s" % (self.id_num, msg.msg_str())
+			if self.debug_level >= 2: print "########## %d received  proposal:%s" % (self.id_num, msg.msg_str())
 			# issue accept message in response to proposal
 			self.send_vote_msg(msg)
 		elif isinstance(msg,message.VoteMsg): # tally received votes
-			print "########## %d received  vote:%s" % (self.id_num, msg.msg_str())
+			if self.debug_level >= 2: print "########## %d received  vote:%s" % (self.id_num, msg.msg_str())
 			# received vote
 			# TODO: fix this, seems incorrect!!
 			self.count_vote_update_ledger(msg)
 		elif isinstance(msg,message.DecisionRequest):
-			print "########## %d received  drequest:%s" % (self.id_num, msg.msg_str())
+			if self.debug_level >= 2: print "########## %d received  drequest:%s" % (self.id_num, msg.msg_str())
 			r_num = msg.proposal.round_num
 			if self.server_data.ledger.lookup_round_num(r_num):
 				self.send_decision_response(self.server_data.ledger.ledger[r_num], msg)
 		elif isinstance(msg,message.DecisionResponse):
-			print "########## %d received  drespons:%s" % (self.id_num, msg.msg_str())
+			if self.debug_level >= 2: print "########## %d received  drespons:%s" % (self.id_num, msg.msg_str())
 
 			# check if entry is in pending
 			if len(self.server_data.pending_requests) != 0 :
@@ -358,13 +355,13 @@ class LockServerThread(Thread):
 	def send_decision_response(self, proposal, msg):
 		response = message.DecisionResponse(proposal)
 		self.paxos_comm[msg.sender].put(response)
-		print "%d sent  drespons:%s" % (self.id_num, response.msg_str())
+		if self.debug_level >= 2: print "%d sent  drespons:%s" % (self.id_num, response.msg_str())
 
 	def send_decision_req(self, round_num):
 		msg = message.DecisionRequest( self.id_num, message.Proposal(None, round_num, None))
 		# don't send to self
 		self.broadcast_to_others(msg)
-		print "%d sent  dreq:%s" % (self.id_num, msg.msg_str())
+		if self.debug_level >= 2: print "%d sent  dreq:%s" % (self.id_num, msg.msg_str())
 	
 	def run(self):
 		time_out = get_lock_server().timeout
