@@ -80,6 +80,10 @@ class LockServerManager:
 		# maps round_no --> psn generator
 		self.psns = dict() # an empty dictionary of unique psns 
 
+		# psn fields
+		self.psn_lock = threading.Lock()
+		self.psn_next = 0
+
 		# TODO: DELETE this later
 		self.print_lock =	threading.Lock()
 	
@@ -117,8 +121,13 @@ class LockServerManager:
 
 	def get_psn(self, round_num):
 		# get the psn generator, or ceate a new one and return a fresh value
-		psn_generator = self.psns.setdefault(round_num, uniquePsn())
-		return psn_generator()
+		#psn_generator = self.psns.setdefault(round_num, uniquePsn())
+		#return psn_generator()
+		self.psn_lock.acquire()
+		psn = self.psn_next
+		self.psn_next += 1
+		self.psn_lock.release()
+		return psn
 		
 		
 
@@ -146,6 +155,9 @@ class LockServerThread(Thread):
 		self.chosen_values = {}
 		self.pending_requests = []
 
+		# drequest timeouts
+		self.dreq_timeout = 0
+
 	
 	# will run the paxos protocol
 		# if previously saved file exists then initialize from it
@@ -168,6 +180,11 @@ class LockServerThread(Thread):
 		for idx, comm in  enumerate(self.paxos_comm): 
 			comm.put(msg)
 
+	def broadcast_to_others(self, msg):
+		for idx, comm in  enumerate(self.paxos_comm): 
+			if idx != self.id_num:
+				comm.put(msg)
+
 	# TODO: if have time, implement dedicated learner
 	def send_to_learner(self, msg):
 		self.broadcast_msg(msg)
@@ -183,8 +200,7 @@ class LockServerThread(Thread):
 		# get new psn, create proposal, and send prepare msg
 		#r_num 	= max(self.server_data.ledger.max_r_num() + 1, self.server_data.max_r_num_accepted() )
 		r_num 	= len(self.server_data.ledger.ledger) - 1
-		psn_fun	= get_lock_server().get_psn(r_num)
-		new_psn	= next(psn_fun)
+		new_psn	= get_lock_server().get_psn(r_num)
 		prop	= message.Proposal(new_psn, r_num, cmd)
 		msg		= message.PrepareMsg(self.id_num, prop)
 		self.broadcast_msg(msg)
@@ -347,7 +363,8 @@ class LockServerThread(Thread):
 
 	def send_decision_req(self, round_num):
 		msg = message.DecisionRequest( self.id_num, message.Proposal(None, round_num, None))
-		self.broadcast_msg(msg)
+		# don't send to self
+		self.broadcast_to_others(msg)
 		print "%d sent  dreq:%s" % (self.id_num, msg.msg_str())
 	# TODO: handle paxos msgs too
 	def run(self):
@@ -355,7 +372,8 @@ class LockServerThread(Thread):
 		while True:
 			self.check_paxos_msgs()
 			
-			if self.server_data.ledger.is_inconsistent():
+			if self.server_data.ledger.is_inconsistent() and self.dreq_timeout < time():
+				self.dreq_timeout = time() + 2 # wait at least 2 sec
 			#	print self.server_data.ledger.missing_entries
 				r_num = self.server_data.ledger.missing_entries[0]
 				self.send_decision_req(r_num)
