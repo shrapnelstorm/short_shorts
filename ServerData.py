@@ -78,7 +78,7 @@ class Ledger:
 	def print_ledger(self):
 		for i in self.ledger:
 			if i != None:
-				print str(i.val) + " round_no: " str(i.round_num) + " length: " + str(len(self.ledger))
+				print str(i.val) + " round_no: "+ str(i.round_num) + " length: " + str(len(self.ledger))
 
 	# return true if only if proposal has been decided
 	def lookup_round_num(self, r_num):

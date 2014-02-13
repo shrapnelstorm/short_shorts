@@ -31,7 +31,7 @@ file_names = ['clients/1.client', 'clients/2.client']
 #file_names = ['clients/simple.client']
 
 #(i,j) specifies the node i fails after time j 
-nodes_tofail = [(1,10),(20,90)]
+nodes_tofail = [(0,0)]
 
 #function that spawns the nodes of a distributed system
 def get_lock_server():
@@ -156,7 +156,7 @@ class LockServerThread(Thread):
 		self.dreq_timeout = 0
 
 		# printing output
-		self.debug_level = 1 # handles output verbosity 0:none, 1:just ledgers, 2:all
+		self.debug_level = 2 # handles output verbosity 0:none, 1:just ledgers, 2:all
 
 	
 	# will run the paxos protocol
@@ -372,11 +372,13 @@ class LockServerThread(Thread):
 	# the main function
 	def run(self):
 		time_out = get_lock_server().timeout
-		while True:
-			for i in nodes_tofail:
+		for i in nodes_tofail:
 			if i[0] == self.id_num:
 				if time() > i[1]:
+					print str(self.id_num) + " is about to fail....."
 					return
+						#print "I die now..."
+		while True:
 			self.check_paxos_msgs()
 			
 			# check ledger consistency
@@ -388,6 +390,8 @@ class LockServerThread(Thread):
 			# check pending client requests, and issue prepare msgs
 			if not self.client_comm.empty() or len(self.server_data.pending_requests) > 0:
 
+				print "the pending requests"
+				print self.server_data.pending_requests
 				# get new messages from queue, add to pending
 				if not self.client_comm.empty():
 					cmd = self.client_comm.get()
@@ -448,6 +452,7 @@ class Client(Thread):
 	# the main function. read instructions from a file and dispatch requests accordingly
     def run(self):
 			instrs = self.read_inst()
+			print instrs
 			for instr in instrs:
 				cmd = self.parse_command(instr)
 				cmd_type, _, _ = cmd
