@@ -4,6 +4,7 @@ import pickle
 # helper modules
 import message
 
+# simple class to remember the status of a single lock
 class Lock_Status:
 	# status = 'obtained' or 'free'
     def __init__(self,status,client_no):
@@ -33,11 +34,13 @@ class VoteTally():
 		self.counts.setdefault(proposal, set()).clear()
 	
 
+# keeps track of all decisions made by paxos round
 class Ledger:
 	def __init__(self):
 		self.ledger 			= [None, None]
 		self.missing_entries	= []
 
+	# add a chosen proposal to the ledger
 	def update_ledger(self, chosen_proposal):
 		round_no = chosen_proposal.round_num
 		last_entry = len(self.ledger) 
@@ -65,6 +68,7 @@ class Ledger:
 		# update ledger
 		self.ledger[round_no] = chosen_proposal
 
+	# returns true if any entries are missing in ledger
 	def is_inconsistent(self):
 		return len(self.missing_entries) > 0
 		
@@ -99,6 +103,7 @@ class Ledger:
 		return max(ls)
         
 # global array of all locks
+# NOTE: this is bad, but we're in a time crunch
 locks = [i for i in range(1,15)]
 
 # stores all persistent data for each server
@@ -161,19 +166,4 @@ class ServerData:
 
 	def update_lock_status(self, lock_no, status):
 		self.lock_statuses[int(lock_no)].status = status
-
-		#for i in range(len(self.ledger)-1,0,-1):
-		#	if self.ledger[i]!=None and self.ledger[i].val[0] == instr and self.ledger[i].val[1] == lock_no:
-		#		return True	    
-		#if self.Ledger == [None,None]:
-		#	return True
-		#return False
-
-		
-## fix these tests!!!
-#s = ServerData(10)
-#s.ledger.update_ledger(Ledger(8,67,34,2))
-#s.update_accepted(3)
-#s.save()
-#if os.path.isfile('10.sav'):
 

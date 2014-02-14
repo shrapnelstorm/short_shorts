@@ -169,7 +169,9 @@ procedure for efficiency reasons.
 ################################################################################
 ##							Quirks, Messups and Other Issues
 ################################################################################
-
+* Unimplemented -- File configuration for servers is unimplemented.
+					Fail rate, node failure and other server features
+					have to be changed in code.
 
 
 

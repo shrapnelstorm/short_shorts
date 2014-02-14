@@ -1,5 +1,5 @@
 ############################################################	
-## Programmer: 	Armando Diaz Tolentino
+## Programmers: Armando Diaz Tolentino & Siva
 ## Desc:		Lock server and lock server manager impl
 ##				implementation.
 ############################################################	
@@ -23,17 +23,23 @@ import message
 import pipe
 import ServerData
 
-# top level functions to use LockServer
-# NOTE: use @staticmethod to define a static method
+
+###						GLOBAL VARS
 NUM_SERVERS = 10
-LS_MGR = None
+LS_MGR = None			# lock server manager
+
+						# client config files
 file_names = ['clients/1.client', 'clients/2.client']
 #file_names = ['clients/simple.client']
 #file_names = ['clients/3.client']
 
+						# node failure list
 #(i,j) specifies the node i fails after time j 
 nodes_tofail = [(0,0),(1,0)]
 
+
+
+###						GLOBAL FUNCTIONS
 #function that spawns the nodes of a distributed system
 def get_lock_server():
 	"""returns global LockServer instance"""
@@ -43,6 +49,7 @@ def get_lock_server():
 	return LS_MGR
 
 
+# NOTE: unused, due to bugs and insufficient time
 # generate a function that creates unique psn's
 def uniquePsn():
 	# generate a unique psn, not sure if this is correct
@@ -64,7 +71,6 @@ class LockServerManager:
 	# responsibilities: revive servers, setup comm, setup unique NumGen
 
 	# call order: create_instances, manage_servers
-	# constructor of the class
 	def __init__(self, n_serv=10, n_client=10):
 		self.num_servers		= n_serv
 		self.num_clients        = n_client
@@ -98,6 +104,8 @@ class LockServerManager:
 		for i in range(self.num_servers):
 			LockServerThread(i, self.paxos_comm, self.client_server_comm[i], self.manager_comm).start()
 
+	# restart a failed server thread, used in recovery.
+	# NOTE: implemented, but not tested
 	@staticmethod
 	def init_new_server(server_id, paxos_comm, sc_comm, man_comm, timeout=0):
 		# wait designated time that server is supposed to be down
@@ -106,20 +114,22 @@ class LockServerManager:
 		# initialize a new server
 		LockServerThread(server_id, paxos_comm, sc_comm, man_comm).run()
 
+	# listen for messages from servers
+	# if server has failed, wait a timeout period and initialize a new server
 	def manage_servers(self):
 		while True:
-			# listen for messages from servers
-			# if server has failed, wait a timeout period and initialize a new server
 			if not self.manager_comm.empty():
 				s_id, timeout = self.manager_comm.get()
+				# start new thread for server
 				Thread(target=LockServerManager.init_new_server, args=(int(s_id), self.paxos_comm, self.client_server_comm[s_id], self.manager_comm,timeout)).start()
 	
 	def run(self):
 		self.manage_servers()
 
 
+	# return a fresh psn for given round number
+	# uses locking to ensure psn given to only one server
 	def get_psn(self, round_num):
-		# get the psn generator, or ceate a new one and return a fresh value
 		#psn_generator = self.psns.setdefault(round_num, uniquePsn())
 		#return psn_generator()
 		self.psn_lock.acquire()
@@ -130,10 +140,11 @@ class LockServerManager:
 		
 		
 
-# server states
-#prep_req, propose, vote_received,
+# class responsibilities: handle requests from clients for locks,
+#			send responses, run paxos protocol to achieve consensus
+#			among peers.
 class LockServerThread(Thread): 
-	"""docstring for LockServer"""
+	"""A single lock server instance"""
 	def __init__(self, id_num, paxos_comm, client_comm, manager_comm, fail_rate=0):
 		Thread.__init__(self)
 
@@ -143,8 +154,9 @@ class LockServerThread(Thread):
 		self.client_comm = client_comm
 		self.manager_comm = manager_comm
 		self.server_data = ServerData.ServerData(id_num, get_lock_server().majority)
-		self.fail_rate = fail_rate
+		self.fail_rate = fail_rate 		# NOTE: not used, intended for recovery code
 
+		# TODO: do we still need these??
 		self.majority= {}
 		self.chosen_values = {}
 		self.pending_requests = []
@@ -155,20 +167,6 @@ class LockServerThread(Thread):
 		# printing output
 		self.debug_level = 1 # handles output verbosity 0:none, 1:just ledgers, 2:all
 
-	
-	# will run the paxos protocol
-		# if previously saved file exists then initialize from it
-		# if received a client request => propose it.
-
-		# listen for msgs from other servers, and 
-		# process according to state and message type
-			# if proposal and haven't seen any other 
-			# proposal then accept 
-
-			# if 
-
-		# save any new state in ledger or instance state
-		# repeat
 
 ###						SENDING MESSAGES 
 	# send a message to every other node
@@ -182,17 +180,14 @@ class LockServerThread(Thread):
 			if idx != self.id_num:
 				comm.put(msg)
 
-	# Design choice for learning chosen values: No dedicated learner - hence broadcast the message to everyone
-	def send_to_learner(self, msg):
-		self.broadcast_msg(msg)
-	
-
 ###						GENERATING MESSAGES
 
 	# create a prepare message for a given round number
 	def send_prepare_msg(self, cmd):
 		# get new psn, create proposal, and send prepare msg
 		#r_num 	= max(self.server_data.ledger.max_r_num() + 1, self.server_data.max_r_num_accepted() )
+
+		# round number dependent only on ledger size
 		r_num 	= len(self.server_data.ledger.ledger) - 1
 		new_psn	= get_lock_server().get_psn(r_num)
 		prop	= message.Proposal(new_psn, r_num, cmd)
@@ -203,7 +198,7 @@ class LockServerThread(Thread):
 	# create a promise mesage, in response to a prepare
 	def send_promise_msg(self, prep_msg):
 
-		# if receive promise for round with chosen value
+		# if receive promise for round with chosen value, send DecisionResponse instead
 		if self.server_data.ledger.lookup_round_num(prep_msg.proposal.round_num):
 			msg = message.DecisionResponse(self.server_data.ledger.ledger[prep_msg.proposal.round_num])
 			self.paxos_comm[prep_msg.sender].put(msg)
@@ -248,6 +243,8 @@ class LockServerThread(Thread):
 
 				
 	    
+	# as a response to proposal, send a vote message depending on state of 
+	# last promies and ledger
 	def send_vote_msg(self, prop_msg):
 		msg = None
 		last_promise = self.server_data.last_promise(prop_msg.proposal.round_num)
@@ -272,8 +269,10 @@ class LockServerThread(Thread):
 
 		# propose client requests
 
+	# count a received vode, 
+	# if a majority is achieved enter it in ledger
+	# and update lock statuses if necessary.
 	def count_vote_update_ledger(self, vote_msg):
-	# handle received messages by type
 		maj_resp, proposal = self.server_data.accept_tally.add_vote(vote_msg.proposal, vote_msg.voter_id)
 
 		if maj_resp:
@@ -321,6 +320,7 @@ class LockServerThread(Thread):
 			if self.server_data.ledger.lookup_round_num(r_num):
 				self.send_decision_response(self.server_data.ledger.ledger[r_num], msg)
 		elif isinstance(msg,message.DecisionResponse):
+			# decision response message means a specific ledger entry has been decided
 			if self.debug_level >= 2: print "########## %d received  drespons:%s" % (self.id_num, msg.msg_str())
 
 			# check if entry is in pending
@@ -359,7 +359,7 @@ class LockServerThread(Thread):
 		self.broadcast_to_others(msg)
 		if self.debug_level >= 2: print "%d sent  dreq:%s" % (self.id_num, msg.msg_str())
 	
-	# the main function
+	# the main loop executed by each server thread
 	def run(self):
 		time_out = get_lock_server().timeout
 		while True:
@@ -407,10 +407,7 @@ class LockServerThread(Thread):
 					self.server_data.pending_requests.insert(0,r)
         
 
-############################################################	
-## Programmer: 	Siva
-## Desc:		Client class
-############################################################	
+# make requests to servers for obtaining and releasing locks
 class Client(Thread):
     
     # constructor for the class
@@ -467,6 +464,7 @@ class Client(Thread):
 					self.send_to_server(cmd)
 					self.read_from_server()
 
+# create clients with config files as params
 def spawn_clients(num,file_names):
      for i in range(num):
         client = Client(i, file_names[i]).start()
