@@ -211,8 +211,6 @@ class LockServerThread(Thread):
 	    
 	# create a promise mesage, in response to a prepare
 	def send_promise_msg(self, prep_msg):
-		#print "%d sending promise" % self.id_num
-		# XXX: change server_data to store Proposal objects!!!
 
 		# if receive promise for round with chosen value
 		if self.server_data.ledger.lookup_round_num(prep_msg.proposal.round_num):
@@ -309,7 +307,6 @@ class LockServerThread(Thread):
 			# print ledger for debugging purposes
 			if self.debug_level >= 1: get_lock_server().print_ledger(self.server_data.ledger, self.id_num)
 
-			#print "%d has this many votes %d" % (self.id_num, len(self.server_data.accept_tally.counts[proposal]) )
 			if len(self.server_data.pending_requests) == 0 :
 				return
 			# update pending requests if there are any
@@ -323,7 +320,6 @@ class LockServerThread(Thread):
 	def handle_paxos_msg(self,msg):
 		if isinstance(msg,message.PrepareMsg): # received prepare, send promise
 			if self.debug_level >= 2: print "########## %d received  prepare:%s" % (self.id_num, msg.msg_str())
-			#print "%d got prepmsg" % self.id_num
 			self.send_promise_msg(msg)
 		elif isinstance(msg,message.PromiseMsg): # received promise, send proposal
 			if self.debug_level >= 2: print "########## %d received  promise:%s" % (self.id_num, msg.msg_str())
@@ -384,12 +380,11 @@ class LockServerThread(Thread):
 	# the main function
 	def run(self):
 		time_out = get_lock_server().timeout
-						#print "I die now..."
 		while True:
 			# fail if necessary
 			for i in nodes_tofail:
 				if i[0] == self.id_num:
-					if time() > i[1]:
+					if time() > i[1] and self.debug_level >= 2:
 						print str(self.id_num) + " is about to fail....."
 						return
 
@@ -406,8 +401,6 @@ class LockServerThread(Thread):
 			# check pending client requests, and issue prepare msgs
 			if not self.client_comm.empty() or len(self.server_data.pending_requests) > 0:
 
-				#print "the pending requests"
-				#print self.server_data.pending_requests
 				# get new messages from queue, add to pending
 				if not self.client_comm.empty():
 					cmd = self.client_comm.get()
@@ -417,12 +410,10 @@ class LockServerThread(Thread):
 				# check if last request's timeout has expired
 				r = self.server_data.pending_requests.pop(0)
 
-				#print self.server_data.lookup_lock_status(r[0][1]) 
 				# lock is unavailable, put back in queue and continue
 				if r[0][0] == 'obtain_lock' and self.server_data.lookup_lock_status(r[0][1]) == 'obtained':
 					# need to push lock to end, to avoid deadlocks
 					self.server_data.pending_requests.append(r)
-					#print "unavailable lock requested"
 					continue # lock is not available
 
 				current_time = time()
@@ -471,8 +462,6 @@ class Client(Thread):
 
 	# write a message to the server queue
     def send_to_server(self, cmd):
-        print "available servers are:"
-        print self.available_servers
         self.available_servers
         rand_idx = random.randint(0,len(self.available_servers) -1)
         rand_server = self.available_servers[rand_idx]
@@ -480,15 +469,12 @@ class Client(Thread):
         
     def read_from_server(self):
 			r = self.client_pipe.get()
-			#print r
 			while (r == None):
 				r = self.client_pipe.get()
-			#print " r after loop " + str(r)
 
 	# the main function. read instructions from a file and dispatch requests accordingly
     def run(self):
 			instrs = self.read_inst()
-			print instrs
 			for instr in instrs:
 				cmd = self.parse_command(instr)
 				cmd_type, _, _ = cmd
@@ -498,11 +484,9 @@ class Client(Thread):
 				else :
 					self.send_to_server(cmd)
 					self.read_from_server()
-			#print "done %d" % self.id_num
 
 def spawn_clients(num,file_names):
      for i in range(num):
-        #print "spawning client"
         client = Client(i, file_names[i]).start()
 
 ############################################################	

@@ -55,7 +55,6 @@ class Ledger:
 		while last_entry <= round_no:
 			self.ledger.append(None)
 			last_entry += 1
-			#print self.missing_entries
 
 		# check for missing entries, and add them
 		for i in range(1,round_no):
@@ -129,8 +128,6 @@ class ServerData:
 		self.lock_statuses		= {}
 		for i in locks:
 			self.lock_statuses[i] = Lock_Status('free', 0)
-			print " the lock status for %d" % i
-			print self.lock_statuses[i].status
 
 	# save and load functions for backup
 	def save(self):
@@ -169,7 +166,6 @@ class ServerData:
 
 	def update_lock_status(self, lock_no, status):
 		self.lock_statuses[int(lock_no)].status = status
-		#print "lock status of %s changed to %s" % (lock_no, status)
 
 		#for i in range(len(self.ledger)-1,0,-1):
 		#	if self.ledger[i]!=None and self.ledger[i].val[0] == instr and self.ledger[i].val[1] == lock_no:
@@ -185,5 +181,4 @@ class ServerData:
 #s.update_accepted(3)
 #s.save()
 #if os.path.isfile('10.sav'):
-#	print 'works'
 
