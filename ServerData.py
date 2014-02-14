@@ -6,6 +6,7 @@ import message
 
 # TODO: add some lock consistency code if have time
 class Lock_Status:
+	# status = 'obtained' or 'free'
     def __init__(self,status,client_no):
         self.status = status
         self.client_no = client_no
@@ -45,36 +46,40 @@ class Ledger:
 	def update_ledger(self, chosen_proposal):
 		round_no = chosen_proposal.round_num
 		last_entry = len(self.ledger) 
+		# successful update
 		if round_no < last_entry-1:
 			self.ledger[round_no] = chosen_proposal
 			return
-		# make room for new entry if needed, & record missing entries
+
+		# make room for new entry then insert it
 		while last_entry <= round_no:
 			self.ledger.append(None)
-			if last_entry > 0 and round_no != last_entry and self.ledger[last_entry] == None:
-				self.missing_entries.append(last_entry)
 			last_entry += 1
 			#print self.missing_entries
+
+		# check for missing entries, and add them
 		for i in range(1,round_no):
 			if self.ledger[i] == None:
 				if i not in self.missing_entries:
 					self.missing_entries.append(i) 
-		# store proposal
-		#print "r: %d size:%d" %(round_no, len(self.ledger))
+
+		# increase ledger size, if the update occurs for the first time
+		# NOTE: ledger length determines round number
 		if self.ledger[round_no] == None:
 		    self.ledger.append(None)
+
+		# update ledger
 		self.ledger[round_no] = chosen_proposal
-		#self.ledger.append(None)
 
 	def is_inconsistent(self):
 		return len(self.missing_entries) > 0
 		
 
-	# XXX: debug function
+	# prints the contents of the ledger
 	def print_ledger(self):
 		for i in self.ledger:
 			if i != None:
-				print str(i.val) + str(i.round_num) + "length:" + str(len(self.ledger))
+				print str(i.val) + " round_no: "+ str(i.round_num) + " length: " + str(len(self.ledger))
 
 	# return true if only if proposal has been decided
 	def lookup_round_num(self, r_num):
@@ -85,6 +90,8 @@ class Ledger:
 	# return missing entries to be requested later
 	def get_missing_entries(self):
 		return self.missing_entries
+	
+	# return the maximim round number
 	def max_r_num(self):
 		pls = [ prop for prop in self.ledger ]
 		ls = []
@@ -97,6 +104,9 @@ class Ledger:
 			return 0
 		return max(ls)
         
+# global array of all locks
+locks = [i for i in range(1,15)]
+
 # stores all persistent data for each server
 class ServerData:
 	def __init__(self, server_id, majority):
@@ -110,10 +120,19 @@ class ServerData:
 			self.promises			= {} 
 			self.pending_requests	= [] # will be accessed directly
 
+
 		# this data is not persistent
 		self.prepare_tally			= VoteTally(majority)
 		self.accept_tally			= VoteTally(majority)
 
+		# lock statuses
+		self.lock_statuses		= {}
+		for i in locks:
+			self.lock_statuses[i] = Lock_Status('free', 0)
+			print " the lock status for %d" % i
+			print self.lock_statuses[i].status
+
+	# save and load functions for backup
 	def save(self):
 		with open(self.file_name,'wb') as output:
 			pickle.dump([self.ledger,self.accepted,self.pending_requests],output,-1)
@@ -122,11 +141,13 @@ class ServerData:
 			with open(self.file_name,'rb') as input:
 				[self.ledger,self.accepted,self.pending_requests] = pickle.load(input)
 
+	# update the list of accepted proposals
 	def update_accepted(self, accepted_prop):
 		## XXX: make sure this psn is higher than previous
 		self.accepted[accepted_prop.round_num] = accepted_prop
 	#def inconsistent(self, round_no):
 		#return (len(self.ledger)+1 < round_no)
+	
 	def max_r_num_accepted(self):
 		ls = [ r_num for r_num in self.accepted.keys()]
 		if len(ls) == 0:
@@ -142,7 +163,20 @@ class ServerData:
 	def last_promise(self, round_num):
 		return self.promises.setdefault(round_num, None)
 	    
-	    
+	# checks if a specific instruction is there in the ledger
+	def lookup_lock_status(self, lock_no):
+		return (self.lock_statuses[int(lock_no)].status )
+
+	def update_lock_status(self, lock_no, status):
+		self.lock_statuses[int(lock_no)].status = status
+		#print "lock status of %s changed to %s" % (lock_no, status)
+
+		#for i in range(len(self.ledger)-1,0,-1):
+		#	if self.ledger[i]!=None and self.ledger[i].val[0] == instr and self.ledger[i].val[1] == lock_no:
+		#		return True	    
+		#if self.Ledger == [None,None]:
+		#	return True
+		#return False
 
 		
 ## fix these tests!!!
