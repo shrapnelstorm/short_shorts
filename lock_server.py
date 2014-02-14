@@ -57,14 +57,11 @@ def uniquePsn():
 			yield tmp
 	return uniqueNumGen
 
-# TODO: file initialization, for now everything
-# 		works as if there are no failures
 class LockServerManager:
 	"""creates and initializes lockservers, and their
 	communication channels."""
 
 	# responsibilities: revive servers, setup comm, setup unique NumGen
-	# TODO: come up with a good way to do this!!
 
 	# call order: create_instances, manage_servers
 	# constructor of the class
@@ -137,7 +134,6 @@ class LockServerManager:
 #prep_req, propose, vote_received,
 class LockServerThread(Thread): 
 	"""docstring for LockServer"""
-	# TODO: figure out how to include majority threshold
 	def __init__(self, id_num, paxos_comm, client_comm, manager_comm, fail_rate=0):
 		Thread.__init__(self)
 
@@ -176,7 +172,6 @@ class LockServerThread(Thread):
 
 ###						SENDING MESSAGES 
 	# send a message to every other node
-	# TODO: do we want to send to self also?
 	def broadcast_msg(self, msg):
 		for idx, comm in  enumerate(self.paxos_comm): 
 			comm.put(msg)
@@ -187,14 +182,10 @@ class LockServerThread(Thread):
 			if idx != self.id_num:
 				comm.put(msg)
 
-	# TODO: if have time, implement dedicated learner
 	# Design choice for learning chosen values: No dedicated learner - hence broadcast the message to everyone
 	def send_to_learner(self, msg):
 		self.broadcast_msg(msg)
 	
-		# TODO: request missing data
-		#if inconsistent(round_no):
-			# update required
 
 ###						GENERATING MESSAGES
 
@@ -229,7 +220,6 @@ class LockServerThread(Thread):
 			 self.paxos_comm[prep_msg.sender].put(msg)
 			 if self.debug_level >= 2: print "%d sent promise :%s" % (self.id_num, msg.msg_str())
 	        
-	# TODO: list of values?
 	# issue proposal message in response to promise messages
 	def send_proposal_msg(self, promise_msg):
 		# storing promise instead of id
@@ -257,14 +247,8 @@ class LockServerThread(Thread):
 			if self.debug_level >= 2: print "%d sent proposal :%s" % (self.id_num, msg.msg_str())
 
 				
-			# XXX: TODO: make sure proposal has value too!!
-			# TODO: after sending proposal, clear tally
-
 	    
-	## TODO: fix server data
-	## This logic seems incorrect. We should be checking if a value has been chosen too (in ledger)
 	def send_vote_msg(self, prop_msg):
-		#print "%d sending vote" % self.id_num
 		msg = None
 		last_promise = self.server_data.last_promise(prop_msg.proposal.round_num)
 
@@ -288,7 +272,6 @@ class LockServerThread(Thread):
 
 		# propose client requests
 
-	# TODO: empty dictionary once a majority is reached
 	def count_vote_update_ledger(self, vote_msg):
 	# handle received messages by type
 		maj_resp, proposal = self.server_data.accept_tally.add_vote(vote_msg.proposal, vote_msg.voter_id)
@@ -331,7 +314,6 @@ class LockServerThread(Thread):
 		elif isinstance(msg,message.VoteMsg): # tally received votes
 			if self.debug_level >= 2: print "########## %d received  vote:%s" % (self.id_num, msg.msg_str())
 			# received vote
-			# TODO: fix this, seems incorrect!!
 			self.count_vote_update_ledger(msg)
 		elif isinstance(msg,message.DecisionRequest):
 			if self.debug_level >= 2: print "########## %d received  drequest:%s" % (self.id_num, msg.msg_str())

@@ -4,7 +4,6 @@ import pickle
 # helper modules
 import message
 
-# TODO: add some lock consistency code if have time
 class Lock_Status:
 	# status = 'obtained' or 'free'
     def __init__(self,status,client_no):
@@ -18,7 +17,6 @@ class VoteTally():
 		self.counts		= dict()
 
 	# count distinct votes, return true if majority
-	# TODO: delete old entries
 	# returns T/F and proposal
 	# True when proposal has been chosen
 	# param: vote is voter_id
@@ -34,15 +32,12 @@ class VoteTally():
 	def clear_votes(self, proposal):
 		self.counts.setdefault(proposal, set()).clear()
 	
-	# TODO: add more code to handle vote tallys
 
 class Ledger:
 	def __init__(self):
 		self.ledger 			= [None, None]
 		self.missing_entries	= []
 
-	# TODO: include logic for updating entries
-	# TODO: accessed in first round?
 	def update_ledger(self, chosen_proposal):
 		round_no = chosen_proposal.round_num
 		last_entry = len(self.ledger) 
